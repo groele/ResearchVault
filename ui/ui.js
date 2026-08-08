@@ -59,6 +59,7 @@
         this.store.dispatch({ type: 'SET_QUERY', query: e.target.value }));
       qs('btnNew').addEventListener('click', () => this._openCreate());
       qs('btnImport').addEventListener('click', () => this.bus.emit('ui:import:pick', {}));
+      qs('btnImportFolder').addEventListener('click', () => this.bus.emit('ui:import:dir', {}));
       qs('btnNewFolder').addEventListener('click', () => this._openNewFolder());
       qs('btnCmd').addEventListener('click', () => this._openCmdPalette());
       qs('btnDensity').addEventListener('click', () => {

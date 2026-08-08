@@ -158,7 +158,15 @@
       try {
         const created = await vault.importFiles();
         await vault.loadItems();
-        toast(`已导入 ${created.length} 个文件`);
+        toast(`已导入 ${created.length} 个文件（已自动按后缀分类打标签）`);
+      } catch (e) { err(e); }
+    });
+    // 导入：点击"导入文件夹"按钮（目录选择，支持自动建立子项目归类与分类打标签）
+    bus.on('ui:import:dir', async () => {
+      try {
+        const created = await vault.importDirectory();
+        await vault.loadItems();
+        toast(`📁 已导入文件夹（共 ${created.length} 个文件，已自动按后缀分类打标签）`);
       } catch (e) { err(e); }
     });
     // 导入：拖放（可拖到主区或侧栏某文件夹）

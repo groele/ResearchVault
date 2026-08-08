@@ -85,6 +85,10 @@
           // 浏览器用 <input type=file> 模拟"选择文件"
           return this._pickFile();
         }
+        case CHANNELS.FS_PICK_DIR: {
+          // 浏览器用 <input type=file webkitdirectory> 模拟"选择文件夹"
+          return this._pickDirectory();
+        }
         case CHANNELS.FS_READ_FILES: {
           // 拖放场景：渲染层只负责把 File 列表交给 bridge，读取逻辑收敛在此
           const [fileList] = args;
@@ -127,6 +131,20 @@
       });
     }
 
+    _pickDirectory() {
+      return new Promise((resolve) => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.webkitdirectory = true;
+        input.directory = true;
+        input.multiple = true;
+        input.onchange = async () => resolve(await this._readFiles([...input.files]));
+        const settle = () => setTimeout(() => { if (!input.files || !input.files.length) resolve([]); }, 400);
+        window.addEventListener('focus', settle, { once: true });
+        input.click();
+      });
+    }
+
     /**
      * 读取一批 File 对象。二进制（图片等）转 dataURL，文本按 UTF-8 读取。
      * Electron 下改为按 file.path 走主进程 fs.readFile，接口返回结构保持一致。
@@ -137,7 +155,14 @@
       const out = [];
       for (const f of files) {
         const isBin = BINARY.test(f.type || '') || /\.(png|jpe?g|gif|webp|bmp|pdf|zip)$/i.test(f.name);
-        const base = { name: f.name, size: f.size, mime: f.type || '', binary: isBin, truncated: false };
+        const base = {
+          name: f.name,
+          relativePath: f.webkitRelativePath || f.name,
+          size: f.size,
+          mime: f.type || '',
+          binary: isBin,
+          truncated: false,
+        };
         if (f.size > MAX) {
           out.push({ ...base, content: '', truncated: true });
           continue;

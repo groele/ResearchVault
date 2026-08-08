@@ -329,10 +329,38 @@
       };
     }
 
+    /** 根据文件扩展名自动归类并衍生科研标签 */
+    _deriveAutoTags(name) {
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      const tags = new Set();
+      const map = {
+        py: ['code', 'python'], js: ['code', 'javascript'], ts: ['code', 'typescript'],
+        cpp: ['code', 'cpp'], c: ['code', 'c'], rs: ['code', 'rust'], go: ['code', 'golang'],
+        sh: ['code', 'shell'], bash: ['code', 'shell'], cu: ['code', 'cuda'],
+        pt: ['model', 'pytorch'], pth: ['model', 'pytorch'], ckpt: ['model', 'checkpoint'],
+        onnx: ['model', 'onnx'], safetensors: ['model', 'safetensors'], h5: ['model', 'keras'],
+        csv: ['dataset', 'csv'], tsv: ['dataset', 'tsv'], json: ['dataset', 'json'],
+        parquet: ['dataset', 'parquet'], npy: ['dataset', 'numpy'],
+        pdf: ['paper', 'pdf'], tex: ['paper', 'latex'], docx: ['paper', 'word'],
+        png: ['image', 'figure'], jpg: ['image', 'photo'], jpeg: ['image', 'photo'], svg: ['image', 'svg'],
+        md: ['note', 'markdown'], txt: ['note', 'text'],
+      };
+      const found = map[ext];
+      if (found) found.forEach((t) => tags.add(t));
+      else if (ext) tags.add(ext);
+      return Array.from(tags);
+    }
+
     // ================= 导入 =================
     async importFiles() {
       const files = await this.ipc.invoke(global.CHANNELS.FS_PICK);
       return this._ingest(files, 'pick');
+    }
+
+    /** 文件夹选择导入：根据后缀自动分类打标签，自动建立子项目层级 */
+    async importDirectory() {
+      const files = await this.ipc.invoke(global.CHANNELS.FS_PICK_DIR);
+      return this._ingest(files, 'folder');
     }
 
     /** 拖放导入：支持拖至全局主区或指定侧边栏文件夹 */
@@ -345,21 +373,41 @@
       if (!files || !files.length) return [];
       const reg = await this._reg();
       const lib = reg.libraries.find((l) => l.id === reg.activeId);
-      const folderId = targetFolderId || lib?.activeFolder || 'root';
       const created = [];
+
       for (const f of files) {
+        const autoTags = this._deriveAutoTags(f.name);
+        let folderId = targetFolderId || lib?.activeFolder || 'root';
+
+        // 识别相对路径，若属于文件夹导入且有层级目录，自动创建子项目归类
+        if (f.relativePath && f.relativePath.includes('/')) {
+          const parts = f.relativePath.split('/').filter(Boolean);
+          if (parts.length > 1) {
+            const dirName = parts[parts.length - 2];
+            const folderObj = await this.createFolder(reg.activeId, { name: dirName, parent: 'root', icon: '📁' });
+            folderId = folderObj.id;
+          }
+        }
+
         const item = await this.createItem({
-          title: f.name, kind: this._guessKind(f.name), libraryId: reg.activeId, folderId,
+          title: f.name,
+          kind: this._guessKind(f.name),
+          tags: autoTags,
+          libraryId: reg.activeId,
+          folderId,
           raw: {
-            content: f.content || '', source: 'file', sourceTime: Date.now(),
-            mime: f.mime || this._mimeOf(f.name), binary: !!f.binary,
+            content: f.content || '',
+            source: via === 'folder' ? 'folder_import' : 'file',
+            sourceTime: Date.now(),
+            mime: f.mime || this._mimeOf(f.name),
+            binary: !!f.binary,
           },
         });
         if (f.truncated) await this._audit(AUDIT_ACTIONS.IMPORT, { itemId: item.id, summary: `「${f.name}」超过 8MB，仅登记元数据未载入内容` });
         created.push(item);
       }
-      await this._audit(AUDIT_ACTIONS.IMPORT, { libraryId: reg.activeId, folderId, summary: `导入 ${created.length} 个文件到文件夹 [${folderId}]（${via}）` });
-      this.bus.emit(global.EVENTS.VAULT_IMPORTED, { items: created, folderId });
+      await this._audit(AUDIT_ACTIONS.IMPORT, { libraryId: reg.activeId, summary: `导入 ${created.length} 个文件，已按扩展名自动分类并打标签（方式: ${via}）` });
+      this.bus.emit(global.EVENTS.VAULT_IMPORTED, { items: created });
       return created;
     }
 

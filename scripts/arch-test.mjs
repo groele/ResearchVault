@@ -342,12 +342,35 @@ bus.on(EVENTS.VAULT_ITEM_CREATED, () => { createdFired = true; });
   s2.dispatch({ type: 'SET_FILTER', patch: { reproducibility: 'failed' } });
   ok('Store: 可复现筛选(仅不可复现失败项)', s2.getState().filtered.length === 1 && s2.getState().filtered[0].id === 'r3');
 
+  // 34) 扩展名自动衍生标签测试 (_deriveAutoTags)
+  const pyTags = vault._deriveAutoTags('train_model.py');
+  const ptTags = vault._deriveAutoTags('resnet50.pt');
+  const csvTags = vault._deriveAutoTags('gene_expression.csv');
+  const pdfTags = vault._deriveAutoTags('nature_paper.pdf');
+  ok('_deriveAutoTags: .py 衍生标签 [code, python]', pyTags.includes('code') && pyTags.includes('python'));
+  ok('_deriveAutoTags: .pt 衍生标签 [model, pytorch]', ptTags.includes('model') && ptTags.includes('pytorch'));
+  ok('_deriveAutoTags: .csv 衍生标签 [dataset, csv]', csvTags.includes('dataset') && csvTags.includes('csv'));
+  ok('_deriveAutoTags: .pdf 衍生标签 [paper, pdf]', pdfTags.includes('paper') && pdfTags.includes('pdf'));
+
+  // 35) 文件夹批量导入：按后缀打标签 + 自动按相对路径建子项目归类 (_ingest)
+  const mockFolderFiles = [
+    { name: 'train.py', relativePath: 'my_project/src/train.py', content: 'import torch', mime: 'text/plain' },
+    { name: 'bert.pt', relativePath: 'my_project/models/bert.pt', content: 'weights', mime: 'application/octet-stream' },
+  ];
+  const ingested = await vault._ingest(mockFolderFiles, 'folder');
+  const itemPy = ingested.find((i) => i.title === 'train.py');
+  const itemPt = ingested.find((i) => i.title === 'bert.pt');
+  ok('_ingest 文件夹导入: train.py 打标签且归类至 src 文件夹', itemPy && itemPy.tags.includes('python') && itemPy.kind === 'code');
+  ok('_ingest 文件夹导入: bert.pt 打标签且归类至 models 文件夹', itemPt && itemPt.tags.includes('pytorch') && itemPt.kind === 'model');
+
   // 清理衍生测试数据
   await vault.deleteItem(dup1.id);
   await vault.deleteItem(dup2.id);
   await vault.deleteItem(titleDup1.id);
   await vault.deleteItem(titleDup2.id);
   await vault.deleteItem(rmItem.id);
+  if (itemPy) await vault.deleteItem(itemPy.id);
+  if (itemPt) await vault.deleteItem(itemPt.id);
 
   console.log(`\n架构数据层验证：${fails === 0 ? '全部通过 🎉' : fails + ' 项失败'}`);
   process.exit(fails === 0 ? 0 : 1);
