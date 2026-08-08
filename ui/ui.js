@@ -617,6 +617,8 @@
           <button class="btn sm" id="pvProc">⚙ 添加后处理版本</button>
           ${it.currentVersion ? '<button class="btn sm ghost" id="pvRevert">↩ 还原原始</button>' : ''}
           <button class="btn sm ${this._diffOpen ? 'on' : ''}" id="pvDiff">⇄ 查看差异</button>
+          <button class="btn sm ghost" id="pvCite" title="复制 BibTeX 学术引用卡片">📋 BibTeX</button>
+          <button class="btn sm ghost" id="pvOpenApp" title="调起外部程序打开">🚀 外部打开</button>
           <button class="btn sm ghost" id="pvMove">📁 移动</button>
           <button class="btn sm ghost" id="pvTag"># 标签</button>
         </div>`;
@@ -644,6 +646,19 @@
       const rev = qs('pvRevert'); if (rev) rev.onclick = () => this.bus.emit(global.EVENTS.UI_SELECT_VERSION, { id: it.id, versionId: null });
       const diff = qs('pvDiff'); if (diff) diff.onclick = () => { this._diffOpen = !this._diffOpen; this.render(this.store.getState()); };
       const ver = qs('pvVer'); if (ver) ver.onchange = (e) => this.bus.emit(global.EVENTS.UI_SELECT_VERSION, { id: it.id, versionId: e.target.value || null });
+      const cite = qs('pvCite'); if (cite) cite.onclick = async () => {
+        try {
+          const bib = await global.__vault.generateCitation(it.id, 'bibtex');
+          await navigator.clipboard.writeText(bib);
+          this.store.dispatch({ type: 'TOAST', toast: '📋 已复制 BibTeX 学术引用卡片' });
+        } catch (e) { console.error(e); }
+      };
+      const openApp = qs('pvOpenApp'); if (openApp) openApp.onclick = async () => {
+        try {
+          const res = await global.__vault.openWith(it.id, 'default');
+          this.store.dispatch({ type: 'TOAST', toast: `已尝试调起程序 [${res.appName || '默认应用'}]` });
+        } catch (e) { console.error(e); }
+      };
       const mv = qs('pvMove'); if (mv) mv.onclick = () => this._moveItem(it);
       const tg = qs('pvTag'); if (tg) tg.onclick = () => this._tagItem(it);
     }
@@ -665,6 +680,68 @@
       dw.hidden = false;
       if (s.drawer === 'audit') this._renderAudit(dw, s);
       else if (s.drawer === 'settings') this._renderSettings(dw, s);
+      else if (s.drawer === 'stats') this._renderStatsDrawer(dw, s);
+    }
+
+    _renderStatsDrawer(dw, s) {
+      const items = s.items || [];
+      const kinds = { code: 0, model: 0, data: 0, paper: 0, image: 0, note: 0, other: 0 };
+      let totalVer = 0;
+      let starredCount = 0;
+
+      for (const it of items) {
+        kinds[it.kind || 'note'] = (kinds[it.kind || 'note'] || 0) + 1;
+        totalVer += (it.processedVersions || []).length;
+        if (it.starred) starredCount++;
+      }
+
+      const total = items.length || 1;
+      const kIcons = { code: '💻 代码', model: '🤖 模型', data: '📊 数据', paper: '📄 论文', image: '🖼️ 图片', note: '📝 笔记', other: '📦 其他' };
+      const bars = Object.entries(kinds).map(([k, cnt]) => {
+        const pct = Math.round((cnt / total) * 100);
+        return `
+          <div class="stat-bar-row">
+            <span class="sb-label">${kIcons[k]}</span>
+            <div class="sb-track"><div class="sb-fill" style="width:${pct}%"></div></div>
+            <span class="sb-val">${cnt} 项 (${pct}%)</span>
+          </div>`;
+      }).join('');
+
+      dw.innerHTML = `
+        <div class="drawer">
+          <div class="drawer-head"><span>📊 科研数据资产看板</span><button class="icon-btn" id="dwClose">✕</button></div>
+          <div class="drawer-sub">实时统计当前资料库的资产类型分布、演进版本数与收藏状态。</div>
+          <div class="drawer-body scroll">
+            <div class="set-block">
+              <div class="set-title">概览指标</div>
+              <div class="stat-cards-grid">
+                <div class="stat-c"><div class="num">${items.length}</div><div class="lbl">资产总数</div></div>
+                <div class="stat-c"><div class="num">${totalVer}</div><div class="lbl">后处理版本</div></div>
+                <div class="stat-c"><div class="num">${starredCount}</div><div class="lbl">星标收藏</div></div>
+              </div>
+            </div>
+            <div class="set-block">
+              <div class="set-title">资产类型分布</div>
+              ${bars}
+            </div>
+            <div class="set-block">
+              <div class="set-title">智能去重治理</div>
+              <button class="btn sm primary" id="btnFindDup">🔍 检出重复与相近条目</button>
+            </div>
+          </div>
+        </div>`;
+      dw.querySelector('#dwClose').onclick = () => this.store.dispatch({ type: 'SET_DRAWER', drawer: null });
+      const findDup = dw.querySelector('#btnFindDup');
+      if (findDup) findDup.onclick = async () => {
+        try {
+          const res = await global.__vault.findDuplicates();
+          if (!res.count) {
+            this.store.dispatch({ type: 'TOAST', toast: '✅ 未发现重复或相近条目' });
+          } else {
+            alert(`共发现 ${res.count} 组潜在重复条目：\n- 全同哈希重复：${res.exact.length} 组\n- 标题相近/重名：${res.titleSimilar.length} 组`);
+          }
+        } catch (e) { console.error(e); }
+      };
     }
 
     _renderAudit(dw, s) {
@@ -972,6 +1049,14 @@
         { icon: '＋', title: '新建科研条目', kbd: 'Cmd / Ctrl + N', run: () => this._openCreate() },
         { icon: '📁', title: '新建子项目文件夹', kbd: '', run: () => this._openNewFolder() },
         { icon: '🗂️', title: '新建资料库', kbd: '', run: () => this._openNewLib() },
+        { icon: '📊', title: '查看科研数据资产分析看板', kbd: '', run: () => this.store.dispatch({ type: 'SET_DRAWER', drawer: 'stats' }) },
+        { icon: '🔍', title: '检出重复与相近科研条目', kbd: '', run: async () => {
+          try {
+            const res = await global.__vault.findDuplicates();
+            if (!res.count) this.store.dispatch({ type: 'TOAST', toast: '✅ 未发现重复或相近条目' });
+            else alert(`共发现 ${res.count} 组潜在重复条目：\n- 全同哈希重复：${res.exact.length} 组\n- 标题相近/重名：${res.titleSimilar.length} 组`);
+          } catch (e) { console.error(e); }
+        }},
         { icon: '⬇', title: '全量导出 JSON 备份包', kbd: '', run: () => this.bus.emit(global.EVENTS.UI_EXPORT, {}) },
         { icon: '📊', title: '导出 CSV 表格数据清单', kbd: '', run: () => this.bus.emit('ui:export:csv', {}) },
         { icon: '🛡️', title: '全库数据完整性指纹校验', kbd: '', run: () => this.bus.emit(global.EVENTS.UI_INTEGRITY_CHECK, {}) },

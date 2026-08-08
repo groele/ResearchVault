@@ -622,6 +622,61 @@
       return [headers.join(','), ...rows].join('\n');
     }
 
+    /** 检索相近与全同重复条目 */
+    async findDuplicates(libraryId) {
+      const reg = await this._reg();
+      libraryId = libraryId || reg.activeId;
+      const items = await this.allInLibrary(libraryId);
+
+      const hashMap = new Map();
+      const titleMap = new Map();
+
+      for (const item of items) {
+        const hash = item.raw?.hash;
+        if (hash) {
+          if (!hashMap.has(hash)) hashMap.set(hash, []);
+          hashMap.get(hash).push(item);
+        }
+        const t = (item.title || '').trim().toLowerCase();
+        if (t) {
+          if (!titleMap.has(t)) titleMap.set(t, []);
+          titleMap.get(t).push(item);
+        }
+      }
+
+      const exact = [];
+      for (const [hash, group] of hashMap.entries()) {
+        if (group.length > 1) exact.push({ hash, items: group });
+      }
+
+      const titleSimilar = [];
+      for (const [title, group] of titleMap.entries()) {
+        if (group.length > 1) {
+          // 若不是全部同一 hash，则记为标题重复/重名条目
+          const hashes = new Set(group.map((i) => i.raw?.hash));
+          if (hashes.size > 1) titleSimilar.push({ title, items: group });
+        }
+      }
+
+      return { exact, titleSimilar, count: exact.length + titleSimilar.length };
+    }
+
+    /** 一键生成学术引用 (BibTeX / Markdown Reference) */
+    async generateCitation(id, format = 'bibtex') {
+      const item = await this.storage.user(id);
+      if (!item) throw new Error('条目不存在');
+
+      const title = item.title || 'Untitled';
+      const key = (title.replace(/[^a-zA-Z0-9]/g, '').slice(0, 15) || 'ref') + '_' + (item.id.slice(-4));
+      const year = new Date(item.createdAt || Date.now()).getFullYear();
+
+      if (format === 'bibtex') {
+        return `@misc{${key},\n  title = {${title}},\n  author = {ResearchVault Asset},\n  year = {${year}},\n  note = {Resource Kind: ${item.kind || 'note'}, Hash: ${item.raw?.hash || 'N/A'}},\n  url = {rv:user:${item.id}}\n}`;
+      } else {
+        return `[${title}](rv:user:${item.id}) - *Kind: ${item.kind || 'note'}, Year: ${year}, Hash: \`${(item.raw?.hash || '').slice(0, 12)}\`*`;
+      }
+    }
+
     /**
      * 从导出包恢复。默认合并（同 id 跳过，不覆盖已有数据）。
      * 恢复前校验清单指纹，指纹不符会警告但仍允许用户确认导入。

@@ -295,6 +295,32 @@ bus.on(EVENTS.VAULT_ITEM_CREATED, () => { createdFired = true; });
   await vault.deleteItem(orphanItem.id);
   ok('删除后记录完全注销', (await storage.user(bt1.id)) === undefined);
 
+  // 27) 智能去重检测器 (findDuplicates) —— 全同哈希去重
+  const dup1 = await vault.createItem({ title: '实验数据 A', kind: 'data', libraryId: lib2.id, folderId: 'root', raw: { content: 'identical-data-content' } });
+  const dup2 = await vault.createItem({ title: '实验数据 B', kind: 'data', libraryId: lib2.id, folderId: 'root', raw: { content: 'identical-data-content' } });
+  const dupReport = await vault.findDuplicates(lib2.id);
+  ok('findDuplicates 检出全同哈希重复组', dupReport.exact.length >= 1 && dupReport.exact.some((g) => g.items.some((i) => i.id === dup1.id) && g.items.some((i) => i.id === dup2.id)));
+
+  // 28) 智能去重检测器 —— 标题相近/重名去重
+  const titleDup1 = await vault.createItem({ title: '重名报告', kind: 'paper', libraryId: lib2.id, folderId: 'root', raw: { content: 'content-x' } });
+  const titleDup2 = await vault.createItem({ title: '重名报告', kind: 'paper', libraryId: lib2.id, folderId: 'root', raw: { content: 'content-y' } });
+  const dupReport2 = await vault.findDuplicates(lib2.id);
+  ok('findDuplicates 检出标题相近重名组', dupReport2.titleSimilar.length >= 1 && dupReport2.titleSimilar.some((g) => g.title === '重名报告'));
+
+  // 29) 学术引用生成器 (generateCitation - BibTeX)
+  const bibStr = await vault.generateCitation(dup1.id, 'bibtex');
+  ok('generateCitation 输出标准 BibTeX 节点', bibStr.includes('@misc{') && bibStr.includes('title = {实验数据 A}'));
+
+  // 30) 学术引用生成器 (generateCitation - Markdown)
+  const mdStr = await vault.generateCitation(dup1.id, 'markdown');
+  ok('generateCitation 输出标准 Markdown 引用格式', mdStr.includes('[实验数据 A]') && mdStr.includes('rv:user:'));
+
+  // 清理衍生测试数据
+  await vault.deleteItem(dup1.id);
+  await vault.deleteItem(dup2.id);
+  await vault.deleteItem(titleDup1.id);
+  await vault.deleteItem(titleDup2.id);
+
   console.log(`\n架构数据层验证：${fails === 0 ? '全部通过 🎉' : fails + ' 项失败'}`);
   process.exit(fails === 0 ? 0 : 1);
 })();

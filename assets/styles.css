@@ -1034,3 +1034,52 @@ body {
 .cmd-item .c-icon { font-size: 16px; width: 22px; text-align: center; }
 .cmd-item .c-title { flex: 1; }
 .cmd-item .c-kbd { font-family: var(--font-mono); font-size: 11px; color: var(--text-mut); }
+
+/* ===== 科研资产看板 (Analytics Dashboard) ===== */
+.stat-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.stat-c {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  text-align: center;
+}
+.stat-c .num {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--primary);
+}
+.stat-c .lbl {
+  font-size: 11px;
+  color: var(--text-soft);
+  margin-top: 4px;
+}
+.stat-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+  font-size: 12.5px;
+}
+.stat-bar-row .sb-label { width: 85px; font-weight: 500; color: var(--text); }
+.stat-bar-row .sb-track {
+  flex: 1;
+  height: 8px;
+  background: var(--surface-subtle);
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.stat-bar-row .sb-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), #8b5cf6);
+  border-radius: 4px;
+  transition: width .3s ease;
+}
+.stat-bar-row .sb-val { font-family: var(--font-mono); font-size: 11px; color: var(--text-soft); width: 75px; text-align: right; }
