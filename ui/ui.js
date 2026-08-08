@@ -9,6 +9,11 @@
  *  - 文件夹视图由 Store.recompute 派生，侧栏各文件夹计数基于"资料库全部条目"精确计算。
  *  - 右侧预览支持版本选择器、原始↔后处理差异对比、原始数据 SHA-256 指纹实时校验徽章。
  *  - 支持批量多选（Space/复选框）、拖放导入、键盘快捷键、审计抽屉与设置抽屉。
+ *
+ * 性能与健壮性：
+ *  - 每个渲染小节带"脏检查签名"，无关状态变化时跳过整段 DOM 重建，避免输入/选择时的全量重绘与闪烁。
+ *  - 列表仅在"数据签名"变化时全量重建；仅选择/聚焦变化时就地打补丁，不重建卡片。
+ *  - 预览渲染包裹 try/catch，单条异常文件不致拖垮整个渲染循环。
  */
 (function (global) {
   'use strict';
@@ -35,6 +40,12 @@
       this.bus = bus;
       this._diffOpen = false;
       this._verifyCache = new Map(); // 指纹校验结果缓存（key = id|hash），避免每次渲染重复计算 SHA-256
+      this._sig = {};                // 各渲染小节的脏检查签名
+      this._toast = undefined;       // 当前 Toast 文案（防止重复重建导致闪烁）
+      this._modalEl = null;
+      this._collapsed = new Set();   // 已折叠的文件夹 id（侧栏树形折叠）
+      this._dragIds = [];            // 拖拽中选中的条目 id（拖到文件夹即归类）
+      this._lastActiveFolder = null; // 用于仅在文件夹切换时滚动定位
       this._bindStatic();
       this._bindKeys();
       store.subscribe((s) => this.render(s));
@@ -99,6 +110,7 @@
       document.addEventListener('keydown', (e) => {
         const t = e.target;
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+        if (this._modalEl) return; // 模态打开时，背景快捷键全部让位给模态自身处理
         const s = this.store.getState();
         const list = s.filtered;
         switch (e.key) {
@@ -144,22 +156,46 @@
       if (s.focusedId) this.store.dispatch({ type: 'SET_FOCUSED', id: null });
     }
 
-    // ============ 主渲染 ============
+    // ============ 主渲染（按小节容错，避免单点失败拖垮整体）============
     render(s) {
-      document.documentElement.setAttribute('data-theme', s.theme);
-      this._renderSidebar(s);
-      this._renderTopbar(s);
-      this._renderToolbar(s);
-      this._renderStats(s);
-      this._renderList(s);
-      this._renderBulk(s);
-      this._renderPreview(s);
-      this._renderDrawer(s);
-      this._renderToast(s);
+      try {
+        if (document.documentElement.getAttribute('data-theme') !== s.theme) {
+          document.documentElement.setAttribute('data-theme', s.theme);
+        }
+      } catch (e) { /* 忽略属性写入异常 */ }
+
+      const sections = [
+        this._renderSidebar, this._renderTopbar, this._renderToolbar, this._renderStats,
+        this._renderList, this._renderBulk, this._renderPreview, this._renderDrawer, this._renderToast,
+      ];
+      for (const fn of sections) {
+        try { fn.call(this, s); }
+        catch (e) { console.error('[UI] ' + (fn.name || 'section') + ' 渲染出错（已隔离）:', e); }
+      }
     }
 
     // ---------- 侧边栏 ----------
     _renderSidebar(s) {
+      const sig = JSON.stringify([
+        s.activeLibraryId, s.activeFolderId, s.libraryStats,
+        s.libraries.map((l) => [l.id, l.name, l.color, l.activeFolder, l.folders.map((f) => [f.id, f.name, f.parent, f.icon])]),
+      ]);
+      if (this._sig.sidebar === sig) return;
+      this._sig.sidebar = sig;
+
+      // 空状态：尚未创建任何资料库
+      if (!s.libraries.length) {
+        qs('libList').innerHTML = `<div class="side-empty">
+          <div class="se-icon">🗂️</div>
+          <div class="se-title">还没有资料库</div>
+          <div class="se-sub">创建第一个资料库，开始管理科研数据</div>
+          <button class="btn primary sm" id="sideNewLib">＋ 新建资料库</button>
+        </div>`;
+        const b = qs('sideNewLib');
+        if (b) b.onclick = () => this._openNewLib();
+        return;
+      }
+
       const libs = s.libraries.map((l) => {
         const active = l.id === s.activeLibraryId;
         const tree = active ? this._folderTree(l, s.activeFolderId) : '';
@@ -179,47 +215,95 @@
       }).join('');
       qs('libList').innerHTML = libs;
 
+      // 仅在切换文件夹时，将激活文件夹滚动到可见区（避免每次选择都跳）
+      if (s.activeFolderId !== this._lastActiveFolder) {
+        this._lastActiveFolder = s.activeFolderId;
+        const af = qs('libList').querySelector('.folder.active');
+        if (af) af.scrollIntoView({ block: 'nearest' });
+      }
+
       qs('libList').querySelectorAll('[data-lib]').forEach((el) =>
         el.onclick = () => this.bus.emit(global.EVENTS.UI_SELECT_LIBRARY, { id: el.dataset.lib }));
       qs('libList').querySelectorAll('[data-folder]').forEach((el) =>
-        el.onclick = (e) => { if (e.target.closest('.fop')) return; this.bus.emit(global.EVENTS.UI_FOLDER_SELECT, { folderId: el.dataset.folder }); });
+        el.onclick = (e) => { if (e.target.closest('.fop') || e.target.closest('.fcaret')) return; this.bus.emit(global.EVENTS.UI_FOLDER_SELECT, { folderId: el.dataset.folder }); });
       qs('libList').querySelectorAll('[data-fren]').forEach((el) =>
         el.onclick = (e) => { e.stopPropagation(); this._renameFolder(el.dataset.fren); });
       qs('libList').querySelectorAll('[data-fdel]').forEach((el) =>
         el.onclick = (e) => { e.stopPropagation(); this._deleteFolder(el.dataset.fdel); });
+      qs('libList').querySelectorAll('[data-fcol]').forEach((el) =>
+        el.onclick = (e) => { e.stopPropagation(); this._toggleCollapse(el.dataset.fcol); });
+      // 拖拽归类：把选中的条目拖到某文件夹即移动
+      qs('libList').querySelectorAll('[data-folder]').forEach((el) => {
+        el.addEventListener('dragover', (e) => { if (this._dragIds.length) { e.preventDefault(); el.classList.add('drag-over'); } });
+        el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+        el.addEventListener('drop', (e) => {
+          e.preventDefault(); el.classList.remove('drag-over');
+          if (this._dragIds.length) {
+            const ids = this._dragIds.slice();
+            this._dragIds = [];
+            this.bus.emit(global.EVENTS.UI_BULK, { action: 'move', ids, payload: { folderId: el.dataset.folder } });
+            this.bus.emit(global.EVENTS.UI_FOLDER_SELECT, { folderId: el.dataset.folder });
+            this.store.dispatch({ type: 'CLEAR_SELECTION' });
+          }
+        });
+      });
+    }
+
+    _toggleCollapse(folderId) {
+      if (this._collapsed.has(folderId)) this._collapsed.delete(folderId);
+      else this._collapsed.add(folderId);
+      this._sig.sidebar = null; // 强制重渲染侧栏
+      this.render(this.store.getState());
     }
 
     _folderTree(lib, activeFolderId) {
       const folders = lib.folders || [{ id: 'root', name: '根目录', parent: null }];
       const byParent = {};
       folders.forEach((f) => { (byParent[f.parent] = byParent[f.parent] || []).push(f); });
+      const hasKids = (pid) => (byParent[pid] || []).length > 0;
+      // 计算激活文件夹的祖先链，确保其始终展开（即使曾被手动折叠）
+      const ancestorIds = new Set();
+      let cur = folders.find((f) => f.id === activeFolderId);
+      while (cur && cur.parent) { ancestorIds.add(cur.parent); cur = folders.find((f) => f.id === cur.parent); }
+
       const walk = (pid, depth) => {
         const kids = byParent[pid] || [];
         return kids.map((f) => {
           const count = this._countInFolder(lib.id, f.id);
-          const indent = 6 + depth * 14;
+          const isCollapsed = this._collapsed.has(f.id) && !ancestorIds.has(f.id);
+          const kidsHtml = (!isCollapsed && hasKids(f.id)) ? `<div class="subtree">${walk(f.id, depth + 1)}</div>` : '';
+          const caret = hasKids(f.id)
+            ? `<span class="fcaret" data-fcol="${f.id}">${isCollapsed ? '▸' : '▾'}</span>`
+            : '<span class="fcaret empty"></span>';
+          const isParent = hasKids(f.id);
+          const icon = f.id === 'root' ? '📦' : (isParent ? (isCollapsed ? '📁' : '📂') : '📄');
           const ops = f.id === 'root' ? '' :
             `<span class="fop"><button class="fmini" data-fren="${f.id}" title="重命名">✎</button><button class="fmini danger" data-fdel="${f.id}" title="删除（条目上移父级）">🗑</button></span>`;
           return `
-            <div class="folder ${f.id === activeFolderId ? 'active' : ''}" data-folder="${f.id}" style="padding-left:${indent}px">
-              <span class="ficon">${f.id === 'root' ? '📦' : '📂'}</span>
+            <div class="folder ${f.id === activeFolderId ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder="${f.id}">
+              ${caret}
+              <span class="ficon">${icon}</span>
               <span class="fname">${escapeHtml(f.name)}</span>
               <span class="fcount">${count}</span>
               ${ops}
             </div>
-            ${walk(f.id, depth + 1)}`;
+            ${kidsHtml}`;
         }).join('');
       };
       return `<div class="tree">${walk('root', 0)}</div>`;
     }
 
-    _countInLib(s, libId) { return s.items.filter((i) => i.libraryId === libId).length; }
+    _countInLib(s, libId) { return s.libraryStats[libId]?.total ?? 0; }
     _countInFolder(libId, folderId) {
-      return this.store.getState().items.filter((i) => i.libraryId === libId && i.folderId === folderId).length;
+      return this.store.getState().libraryStats[libId]?.folders?.[folderId] ?? 0;
     }
 
     // ---------- 顶栏面包屑 ----------
     _renderTopbar(s) {
+      const sig = JSON.stringify([s.activeLibraryId, s.activeFolderId, s.density, s.cryptoLocked]);
+      if (this._sig.topbar === sig) return;
+      this._sig.topbar = sig;
+
       const lib = s.libraries.find((l) => l.id === s.activeLibraryId);
       const folders = lib?.folders || [];
       const path = this._folderPath(folders, s.activeFolderId);
@@ -238,6 +322,10 @@
 
     // ---------- 工具栏激活态 ----------
     _renderToolbar(s) {
+      const sig = JSON.stringify([s.filters, s.sort, s.viewMode]);
+      if (this._sig.toolbar === sig) return;
+      this._sig.toolbar = sig;
+
       qs('viewSeg').querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === s.viewMode));
       if (qs('selKind').value !== s.filters.kind) qs('selKind').value = s.filters.kind;
       if (qs('selProcessed').value !== s.filters.processed) qs('selProcessed').value = s.filters.processed;
@@ -249,29 +337,76 @@
     // ---------- 统计 ----------
     _renderStats(s) {
       const vis = s.filtered;
-      const total = s.items.length;
       const starred = vis.filter((i) => i.starred).length;
       const processed = vis.filter((i) => (i.processedVersions || []).length > 0).length;
       const tags = new Set(s.items.flatMap((i) => i.tags || [])).size;
+      const sig = `${vis.length}|${s.items.length}|${starred}|${processed}|${tags}`;
+      if (this._sig.stats === sig) return;
+      this._sig.stats = sig;
+
       qs('stats').innerHTML = `
         <div class="stat"><div class="num">${vis.length}</div><div class="lbl">可见</div></div>
-        <div class="stat"><div class="num">${total}</div><div class="lbl">资料库总计</div></div>
+        <div class="stat"><div class="num">${s.items.length}</div><div class="lbl">资料库总计</div></div>
         <div class="stat"><div class="num">${starred}</div><div class="lbl">收藏</div></div>
         <div class="stat"><div class="num">${processed}</div><div class="lbl">已后处理</div></div>
         <div class="stat"><div class="num">${tags}</div><div class="lbl">标签</div></div>`;
     }
 
-    // ---------- 卡片列表 ----------
+    // ---------- 卡片列表（脏检查 + 选择/聚焦就地补丁）----------
     _renderList(s) {
       const wrap = qs('cards');
       wrap.className = 'cards' + (s.density === 'compact' ? ' compact' : '');
-      if (!s.ready) { wrap.innerHTML = Array.from({ length: 8 }).map(() => '<div class="skeleton"></div>').join(''); return; }
+      if (!s.ready) {
+        if (this._sig.listReady !== false) {
+          wrap.innerHTML = Array.from({ length: 8 }).map(() => '<div class="skeleton"></div>').join('');
+          this._sig.listReady = false;
+        }
+        this._sig.list = '';
+        return;
+      }
+      this._sig.listReady = true;
+
+      // 空状态：区分"搜索/筛选无果"与"真无条目"
       if (!s.filtered.length) {
-        wrap.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">📚</div><div>当前视图暂无条目</div><div class="muted">点「＋ 新建」或把文件拖入此区域导入</div></div>`;
+        const filtered = s.query || s.filters.kind !== 'all' || s.filters.starred || s.filters.processed !== 'all';
+        const emptySig = 'empty:' + (filtered ? 'f' : '0') + ':' + (s.query || '');
+        if (this._sig.list !== emptySig) {
+          wrap.innerHTML = filtered
+            ? `<div class="empty"><div class="big">🔍</div><div>未找到匹配的条目</div><div class="muted">试试调整搜索词或筛选条件${s.query ? `：「${escapeHtml(s.query)}」` : ''}</div></div>`
+            : `<div class="empty"><div class="big">📚</div><div>当前视图暂无条目</div><div class="muted">点「＋ 新建」或把文件拖入此区域导入</div></div>`;
+          this._sig.list = emptySig;
+        }
+        return;
+      }
+
+      // 数据签名：捕获会影响卡片 HTML 的全部字段；签名不变则只补丁选择/聚焦
+      const dataSig = s.filtered.map((i) =>
+        `${i.id}:${i.starred ? 1 : 0}:${(i.processedVersions || []).length}:${i.currentVersion || ''}:${i.raw?.hash || ''}:${(i.tags || []).join(',')}:${i.title}:${i.kind}:${s.density}`
+      ).join('|');
+
+      if (this._sig.list === dataSig) {
+        this._patchListVisual(s); // 仅选择/聚焦变化 → 就地改类，不重建
         return;
       }
       wrap.innerHTML = s.filtered.map((it) => this._cardHtml(it, s)).join('');
-      wrap.querySelectorAll('[data-item]').forEach((el) => {
+      this._bindCards(s);
+      this._sig.list = dataSig;
+    }
+
+    /** 仅更新每张卡片的选中/聚焦态（含复选框），不重建 DOM */
+    _patchListVisual(s) {
+      const sel = new Set(s.selection);
+      qs('cards').querySelectorAll('[data-item]').forEach((el) => {
+        const id = el.dataset.item;
+        el.classList.toggle('sel', sel.has(id));
+        el.classList.toggle('focused', id === s.focusedId);
+        const chk = el.querySelector('[data-check]');
+        if (chk) chk.checked = sel.has(id);
+      });
+    }
+
+    _bindCards(s) {
+      qs('cards').querySelectorAll('[data-item]').forEach((el) => {
         const id = el.dataset.item;
         el.onclick = (e) => {
           if (e.target.closest('.card-actions') || e.target.closest('.card-check')) return;
@@ -281,6 +416,17 @@
         if (chk) chk.onclick = (e) => { e.stopPropagation(); this.store.dispatch({ type: 'TOGGLE_SELECT', id }); };
         el.querySelector('[data-star]').onclick = (e) => { e.stopPropagation(); this.bus.emit(global.EVENTS.UI_TOGGLE_STAR, { id }); };
         el.querySelector('[data-del]').onclick = (e) => { e.stopPropagation(); this._confirmDelete(id); };
+        // 拖拽归类：记录待移动条目（多选则整体移动，单选则仅该条目）
+        el.addEventListener('dragstart', (e) => {
+          const selNow = this.store.getState().selection;
+          this._dragIds = selNow.includes(id) ? selNow.slice() : [id];
+          if (e.dataTransfer) {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', this._dragIds.join(','));
+          }
+          el.classList.add('dragging');
+        });
+        el.addEventListener('dragend', () => { el.classList.remove('dragging'); this._dragIds = []; });
       });
     }
 
@@ -289,13 +435,13 @@
       const vcount = (it.processedVersions || []).length;
       const procBadge = vcount ? `<span class="badge proc" title="含 ${vcount} 个后处理版本">⚙ ${vcount} 版</span>` : '';
       const curBadge = it.currentVersion ? '<span class="badge cur">处理后视图</span>' : '';
-      const starBadge = it.starred ? '<span class="star-i">★</span>' : '';
+      const starBadge = it.starred ? '<span class="star-i" title="已收藏">★</span>' : '';
       const sel = s.selection.includes(it.id) ? 'sel' : '';
       const focused = it.id === s.focusedId ? 'focused' : '';
       const src = it.raw?.source === 'file' ? '📄 导入' : '✎ 手建';
       const verified = this._verifyBadge(it);
       return `
-        <div class="card ${sel} ${focused} ${it.starred ? 'starred' : ''}" data-item="${it.id}">
+        <div class="card ${sel} ${focused} ${it.starred ? 'starred' : ''}" data-item="${it.id}" draggable="true">
           <label class="card-check"><input type="checkbox" data-check ${sel ? 'checked' : ''} /></label>
           <div class="card-ico" title="${escapeHtml(kindLabel(it.kind))}">${kindIcon(it.kind)}</div>
           <div class="card-main">
@@ -328,8 +474,12 @@
     // ---------- 批量操作栏 ----------
     _renderBulk(s) {
       const bar = qs('bulkBar');
-      if (!s.selection.length) { bar.hidden = true; bar.innerHTML = ''; return; }
       const ids = s.selection;
+      const sig = ids.join(',') + '|' + (s.libraries.find((l) => l.id === s.activeLibraryId)?.folders || []).map((f) => f.id).join(',');
+      if (this._sig.bulk === sig) return;
+      this._sig.bulk = sig;
+
+      if (!ids.length) { bar.hidden = true; bar.innerHTML = ''; return; }
       bar.hidden = false;
       const lib = s.libraries.find((l) => l.id === s.activeLibraryId);
       const folders = (lib?.folders || []).filter((f) => f.id !== 'root');
@@ -361,10 +511,19 @@
     _renderPreview(s) {
       const pane = qs('preview');
       const it = s.items.find((i) => i.id === s.focusedId);
+      const sig = JSON.stringify([
+        s.focusedId, s.viewMode, this._diffOpen,
+        it ? [it.raw?.hash, (it.processedVersions || []).length, it.currentVersion, it.title, (it.tags || []).join(','), it.processed?.hash] : null,
+      ]);
+      if (this._sig.preview === sig && pane.dataset.bound) return;
+      this._sig.preview = sig;
+
       if (!it) {
+        pane.dataset.bound = '0';
         pane.innerHTML = `<div class="pv-empty">👈 选择左侧条目以预览<br><small>支持文本 / Markdown / CSV / JSON / 图片内置预览；原始数据与后处理可逐行对比</small></div>`;
         return;
       }
+      pane.dataset.bound = '1';
       const mode = s.viewMode;
       const vcount = (it.processedVersions || []).length;
       const verified = this._verifyBadge(it);
@@ -398,19 +557,18 @@
 
       let body;
       if (this._diffOpen && cur) {
-        body = `<div class="pv-body">${global.Preview.renderDiff(it.raw.content, cur.content)}</div>`;
+        body = `<div class="pv-body">${this._safePreview(() => global.Preview.renderDiff(it.raw.content, cur.content), '差异渲染失败')}</div>`;
       } else if (this._diffOpen && !cur) {
         body = `<div class="pv-note">当前为原始数据视图，尚无后处理版本可对比。点击「添加后处理版本」后再对比。</div>`;
       } else {
         body = '';
-        // 'details' 作为"对比"的别名，避免空预览
         const showRaw = mode === 'raw' || mode === 'split' || mode === 'details';
         const showProc = mode === 'processed' || mode === 'split' || mode === 'details';
         if (showRaw) {
-          body += `<div class="pv-pane"><div class="pv-pane-h">原始 (Raw)</div><div class="pv-body">${global.Preview.render(it, 'raw')}</div></div>`;
+          body += `<div class="pv-pane"><div class="pv-pane-h">原始 (Raw)</div><div class="pv-body">${this._safePreview(() => global.Preview.render(it, 'raw'), '原始预览渲染失败')}</div></div>`;
         }
         if (showProc) {
-          const pHtml = it.processed ? global.Preview.render(it, 'processed') : '<div class="pv-note">尚未添加后处理版本</div>';
+          const pHtml = it.processed ? this._safePreview(() => global.Preview.render(it, 'processed'), '后处理预览渲染失败') : '<div class="pv-note">尚未添加后处理版本</div>';
           body += `<div class="pv-pane"><div class="pv-pane-h">后处理 (Processed) ${it.processed ? '' : '— 暂无'}</div><div class="pv-body">${pHtml}</div></div>`;
         }
       }
@@ -424,9 +582,19 @@
       const tg = qs('pvTag'); if (tg) tg.onclick = () => this._tagItem(it);
     }
 
+    /** 包裹预览渲染，异常时返回降级提示，避免单条坏数据拖垮整个 UI */
+    _safePreview(fn, label) {
+      try { return fn() || ''; }
+      catch (e) { console.warn('[preview]', label, e); return `<div class="pv-note">⚠ ${escapeHtml(label)}</div>`; }
+    }
+
     // ---------- 抽屉：审计 / 设置 ----------
     _renderDrawer(s) {
       const dw = qs('drawer');
+      const sig = JSON.stringify([s.drawer, s.audit[0]?.ts || 0, s.audit.length, s.integrity?.checkedAt || 0]);
+      if (this._sig.drawer === sig) return;
+      this._sig.drawer = sig;
+
       if (!s.drawer) { dw.hidden = true; dw.innerHTML = ''; return; }
       dw.hidden = false;
       if (s.drawer === 'audit') this._renderAudit(dw, s);
@@ -505,17 +673,18 @@
       dw.querySelector('#setEngine').onclick = () => this.bus.emit(global.EVENTS.UI_ENGINE_SWITCH, {});
     }
 
-    // ---------- Toast ----------
+    // ---------- Toast（去重，避免每次渲染重建导致闪烁）----------
     _renderToast(s) {
+      if (this._toast === s.toast) return; // 文案未变，保持现状
+      this._toast = s.toast;
       const old = document.querySelector('.toast');
       if (old) old.remove();
-      if (s.toast) {
-        const t = document.createElement('div');
-        t.className = 'toast';
-        t.textContent = s.toast;
-        document.body.appendChild(t);
-        setTimeout(() => this.store.dispatch({ type: 'TOAST', toast: null }), 2000);
-      }
+      if (!s.toast) return;
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.textContent = s.toast;
+      document.body.appendChild(t);
+      setTimeout(() => this.store.dispatch({ type: 'TOAST', toast: null }), 2200);
     }
 
     // ============ 模态 ============
@@ -525,8 +694,17 @@
       ov.className = 'overlay';
       ov.innerHTML = `<div class="modal">${html}</div>`;
       ov.onclick = (e) => { if (e.target === ov) this._closeModal(); };
+      // 模态内键盘：Esc 关闭；单行输入框内 Enter 提交主操作（多行 textarea 的 Enter 用于换行，不拦截）
+      ov.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); this._closeModal(); return; }
+        if (e.key === 'Enter' && e.target.tagName === 'INPUT') { e.preventDefault(); const ok = ov.querySelector('.btn.primary'); if (ok) ok.click(); }
+      });
       document.body.appendChild(ov);
       this._modalEl = ov;
+      // 自动聚焦首个可输入控件
+      const f = ov.querySelector('input, textarea, select');
+      if (f) { try { f.focus(); } catch (_) {} }
+      return ov;
     }
     _closeModal() { if (this._modalEl) { this._modalEl.remove(); this._modalEl = null; } }
 

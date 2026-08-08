@@ -124,6 +124,7 @@
         const lib = await vault.createLibrary({ name, icon, color });
         store.dispatch({ type: 'SET_ACTIVE_LIBRARY', id: lib.id });
         await vault.loadItems(lib.id);
+        refreshStats();
         toast(`已创建资料库：${name}`);
       } catch (e) { err(e); }
     });
@@ -147,6 +148,7 @@
       try {
         const libId = store.getState().activeLibraryId;
         await vault.deleteFolder(libId, folderId);
+        refreshStats();
         toast('已删除子项目（条目已安全上移父级）');
       } catch (e) { err(e); }
     });
@@ -176,6 +178,7 @@
         storage.setCrypto(vault.crypto);
         // 解锁后必须重新载入：此前因未解锁而跳过的加密条目此刻才能解密读回
         await vault.loadItems();
+        refreshStats();
         toast('加密存储已启用（AES-GCM 256）');
       } catch (e) { err(e); }
     });
@@ -206,6 +209,7 @@
         const text = await file.text();
         const pkg = JSON.parse(text);
         const res = await vault.restoreJSON(pkg);
+        refreshStats();
         const v = res.verified === false ? '（⚠ 清单指纹不符）' : res.verified ? '（指纹校验通过）' : '';
         toast(`恢复完成：新增 ${res.added}、跳过 ${res.skipped}${v}`);
       } catch (e) { err(e); }
@@ -234,6 +238,7 @@
           : new adapters.FileSystemAdapter(ipcBridge);
         storage.use(next);
         await vault.init(); // 在新引擎上重建注册表与条目
+        refreshStats();
         store.dispatch({ type: 'SET_ENGINE', engine: storage.engineName });
         const el = document.getElementById('engineInfo');
         if (el) el.textContent = '存储引擎：' + storage.engineName;
@@ -255,13 +260,22 @@
     // ============================================================
     // 接线：业务领域事件 -> Store（单一可信来源）
     // ============================================================
-    bus.on(EVENTS.VAULT_INIT, ({ libraries, activeId }) =>
-      store.dispatch({ type: 'SET_LIBRARIES', libraries, activeId }));
-    bus.on(EVENTS.VAULT_ITEMS_LOADED, ({ items, folderId }) =>
-      store.dispatch({ type: 'SET_ITEMS', items, folderId }));
-    bus.on(EVENTS.VAULT_ITEM_CREATED, ({ item }) => store.dispatch({ type: 'ADD_ITEM', item }));
-    bus.on(EVENTS.VAULT_ITEM_UPDATED, ({ item }) => store.dispatch({ type: 'UPDATE_ITEM', item }));
-    bus.on(EVENTS.VAULT_ITEM_DELETED, ({ id }) => store.dispatch({ type: 'REMOVE_ITEM', id }));
+    // 侧栏计数：扫描全量用户数据，保证非激活资料库也能正确显示数量
+    const refreshStats = async () => {
+      try { const stats = await vault.stats(); store.dispatch({ type: 'SET_LIBRARY_STATS', stats }); } catch (_) {}
+    };
+
+    bus.on(EVENTS.VAULT_INIT, ({ libraries, activeId }) => {
+      store.dispatch({ type: 'SET_LIBRARIES', libraries, activeId });
+      refreshStats();
+    });
+    bus.on(EVENTS.VAULT_ITEMS_LOADED, ({ items, folderId }) => {
+      store.dispatch({ type: 'SET_ITEMS', items, folderId });
+      refreshStats();
+    });
+    bus.on(EVENTS.VAULT_ITEM_CREATED, ({ item }) => { store.dispatch({ type: 'ADD_ITEM', item }); refreshStats(); });
+    bus.on(EVENTS.VAULT_ITEM_UPDATED, ({ item }) => { store.dispatch({ type: 'UPDATE_ITEM', item }); refreshStats(); });
+    bus.on(EVENTS.VAULT_ITEM_DELETED, ({ id }) => { store.dispatch({ type: 'REMOVE_ITEM', id }); refreshStats(); });
 
     // 审计日志：实时前插（抽屉无需每次重新拉取）
     bus.on(EVENTS.AUDIT_APPENDED, ({ record }) => {
@@ -273,12 +287,11 @@
     // 批量完成：清空选择并提示
     bus.on(EVENTS.VAULT_BULK_DONE, ({ action, count }) => {
       store.dispatch({ type: 'CLEAR_SELECTION' });
+      refreshStats();
       toast(`批量操作「${action}」完成（${count} 项）`);
     });
     // 存储就绪
     bus.on(EVENTS.STORAGE_READY, () => store.dispatch({ type: 'STORAGE_READY' }));
-    // 统一错误通道
-    bus.on(EVENTS.ERROR, (e) => store.dispatch({ type: 'ERROR', error: e }));
 
     // ============================================================
     // 启动
@@ -296,7 +309,24 @@
       toast('提示：请通过本地服务器打开（如 python -m http.server），否则加密/指纹不可用');
     }
 
-    await vault.init();
+    // 启动失败应优雅降级（如 file:// 下 crypto.subtle 不可用导致存储层失败），
+    // 而不是永远卡在骨架屏。
+    try {
+      await vault.init();
+      refreshStats();
+    } catch (e) {
+      console.error('[ResearchVault] 启动失败', e);
+      const msg = String((e && e.message) || e);
+      const hint = msg.includes('subtle') || msg.includes('crypto')
+        ? '请改用本地服务器打开：在该目录执行 <code>node scripts/serve.mjs</code> 后访问 http://localhost:8099'
+        : '请查看控制台日志，或改用本地服务器打开本应用。';
+      const main = document.getElementById('cards');
+      if (main) {
+        main.className = 'cards';
+        main.innerHTML = `<div class="empty"><div class="big">⚠️</div><div>启动失败：${msg.replace(/</g, '&lt;')}</div><div class="muted">${hint}</div></div>`;
+      }
+      return;
+    }
     // 载入既有审计日志到抽屉
     try {
       const initialAudit = await vault.getAudit();

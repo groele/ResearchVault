@@ -29,6 +29,7 @@
     cryptoLocked: true,
     viewMode: 'split',       // split | raw | processed
     engine: 'FileSystemAdapter',
+    libraryStats: {},        // { [libId]: { total, folders: { folderId: n } } } —— 侧栏计数（全库扫描，非仅激活库）
     audit: [],
     integrity: null,         // 最近一次完整性自检报告
     drawer: null,            // null | 'audit' | 'settings'
@@ -88,8 +89,10 @@
         return { ...state, theme: action.theme };
       case 'SET_CRYPTO':
         return { ...state, cryptoLocked: action.locked };
-      case 'SET_ENGINE':
-        return { ...state, engine: action.engine };
+    case 'SET_ENGINE':
+      return { ...state, engine: action.engine };
+    case 'SET_LIBRARY_STATS':
+      return { ...state, libraryStats: action.stats };
       case 'SET_AUDIT':
         return { ...state, audit: action.audit };
       case 'SET_INTEGRITY':

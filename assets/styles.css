@@ -225,8 +225,9 @@ body {
 }
 
 .folder.drag-over {
-  background: var(--primary-soft) !important;
-  border: 2px dashed var(--primary);
+  background: var(--primary-soft);
+  outline: 2px dashed var(--primary);
+  outline-offset: -2px;
 }
 
 .side-foot {
@@ -426,27 +427,50 @@ body {
 .cards.compact { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 9px; }
 
 .card {
+  display: grid;
+  grid-template-columns: 22px 40px 1fr;
+  grid-template-areas: "check ico main";
+  gap: 10px;
+  align-items: start;
   background: var(--surface-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px;
   position: relative;
   cursor: pointer;
-  min-height: 120px;
+  min-height: 116px;
   box-shadow: var(--shadow-sm);
+  transition: box-shadow .18s ease, border-color .18s ease, transform .12s ease;
 }
 .card[draggable="true"] { cursor: grab; }
 .card.dragging { opacity: 0.4; }
 
+.card-check { display: flex; align-items: flex-start; padding-top: 2px; }
+.card-check input { width: 15px; height: 15px; accent-color: var(--primary); cursor: pointer; }
+
+.card-ico {
+  grid-area: ico;
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  display: grid; place-items: center;
+  font-size: 19px;
+  box-shadow: inset 0 0 0 1px rgba(99, 102, 241, .18);
+}
+.card-main { grid-area: main; min-width: 0; }
+
 .card:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--border-hover);
+  transform: translateY(-1px);
 }
 .card.focused {
   border-color: var(--primary);
   box-shadow: 0 0 0 2px var(--primary-glow);
 }
-.card.starred .star { color: var(--star); }
+.card .star-i { color: var(--text-mut); }
+.card.starred .star-i { color: var(--star); }
 
 .card .kind {
   font-size: 10.5px;
@@ -721,3 +745,163 @@ body {
 .drawer-head { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .drawer-head h3 { font-family: var(--font-display); font-size: 16px; margin: 0; }
 .drawer-body { padding: 18px; flex: 1; overflow-y: auto; }
+
+/* ============ 补全组件样式（确保 UI 全部元素均有呈现）============ */
+
+/* 通用徽章：指纹 / 处理版本 / 当前视图 / 异常 */
+.badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; font-weight: 600; border-radius: var(--radius-pill);
+  padding: 1px 7px; white-space: nowrap;
+}
+.badge.ok { background: rgba(5, 150, 105, .12); color: var(--proc); }
+.badge.bad { background: rgba(220, 38, 38, .12); color: var(--danger); }
+.badge.proc { background: rgba(5, 150, 105, .12); color: var(--proc); }
+.badge.cur { background: var(--primary-soft); color: var(--primary); }
+
+/* 通用弱化文字 */
+.muted { color: var(--text-mut); font-size: 12px; }
+
+/* 按钮激活态（密度 / 收藏 / 加密切换） */
+.btn.on { background: var(--primary-soft); color: var(--primary); border-color: var(--primary); }
+
+/* 指纹哈希显示 */
+.hash { font-family: var(--font-mono); font-size: 11px; color: var(--text-mut); word-break: break-all; }
+
+/* 空状态补充说明 */
+.empty .muted { margin-top: 6px; }
+
+/* 批量栏信息 */
+.bulk-info { font-size: 12.5px; color: var(--text-soft); }
+.bulk-info b { color: var(--primary); font-size: 14px; }
+
+/* ---------- 抽屉容器（修正：#drawer 作为固定右滑面板） ---------- */
+#drawer {
+  position: fixed; inset: 0; z-index: 85;
+  background: rgba(10, 15, 25, .4);
+  display: none; justify-content: flex-end;
+}
+#drawer:not([hidden]) { display: flex; }
+#drawer .drawer {
+  width: 420px; max-width: 90vw; height: 100%;
+  background: var(--surface-card);
+  display: flex; flex-direction: column;
+  box-shadow: var(--shadow-lg);
+  border-left: 1px solid var(--border);
+  animation: drawerIn .22s cubic-bezier(.2, .8, .3, 1);
+}
+@keyframes drawerIn { from { transform: translateX(26px); opacity: .55; } to { transform: none; opacity: 1; } }
+.drawer-sub { padding: 0 20px 14px; color: var(--text-mut); font-size: 12px; line-height: 1.6; }
+
+/* 设置面板 */
+.set-block {
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px; margin-bottom: 12px; background: var(--surface-subtle);
+}
+.set-title { font-family: var(--font-display); font-weight: 700; font-size: 13px; margin-bottom: 10px; }
+.set-line { font-size: 12.5px; color: var(--text-soft); margin: 5px 0; line-height: 1.55; }
+.set-line.ok { color: var(--proc); font-weight: 600; }
+.set-line.bad { color: var(--danger); font-weight: 600; }
+.set-line.muted { color: var(--text-mut); }
+.set-block .btn { margin: 4px 6px 4px 0; }
+
+/* 审计日志行 */
+.audit-row {
+  display: grid; grid-template-columns: 132px 112px 1fr; gap: 10px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  margin-bottom: 8px; background: var(--surface-card); font-size: 12px;
+}
+.a-time { color: var(--text-mut); font-family: var(--font-mono); font-size: 11px; }
+.a-act .a-badge {
+  display: inline-block; background: var(--primary-soft); color: var(--primary);
+  border-radius: var(--radius-pill); padding: 1px 8px; font-size: 11px; font-weight: 600;
+}
+.a-sum { color: var(--text-soft); line-height: 1.5; }
+
+/* 动画：骨架屏微光 / 模态 / Toast */
+.skeleton {
+  height: 116px; border-radius: var(--radius);
+  background: linear-gradient(100deg, var(--surface-subtle) 30%, var(--surface-muted) 50%, var(--surface-subtle) 70%);
+  background-size: 200% 100%;
+  animation: skeleton 1.25s ease-in-out infinite;
+}
+@keyframes skeleton { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+.overlay { animation: fade .15s ease; }
+.modal { animation: pop .18s cubic-bezier(.2, .8, .3, 1); }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+
+.toast { animation: toastIn .2s ease; }
+@keyframes toastIn { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+/* 键盘可达性：统一焦点环 */
+:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius-sm); }
+
+/* ============================================================
+   侧边栏深化样式：资料库分组 / 空状态 / 嵌套树引导线 / 折叠箭头 / 悬停操作
+   ============================================================ */
+.lib-block { margin-bottom: 10px; }
+
+/* 空状态（无资料库） */
+.side-empty {
+  margin: 14px 8px;
+  padding: 26px 18px;
+  text-align: center;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-subtle);
+}
+.side-empty .se-icon { font-size: 30px; }
+.side-empty .se-title { font-family: var(--font-display); font-weight: 700; font-size: 14px; margin-top: 8px; color: var(--text); }
+.side-empty .se-sub { font-size: 12px; color: var(--text-mut); margin: 4px 0 14px; line-height: 1.5; }
+
+/* 嵌套子树：左侧引导线 + 缩进，呈现层级关系 */
+.subtree {
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+.subtree .folder { font-size: 12.5px; }
+
+/* 折叠箭头 */
+.fcaret {
+  flex: 0 0 14px;
+  width: 14px;
+  text-align: center;
+  font-size: 10px;
+  color: var(--text-mut);
+  cursor: pointer;
+  user-select: none;
+  transition: color .12s ease, transform .12s ease;
+}
+.fcaret:hover { color: var(--primary); }
+.fcaret.empty { cursor: default; visibility: hidden; }
+
+/* 文件夹图标与计数微调 */
+.folder .ficon { font-size: 13px; flex: 0 0 auto; }
+.folder .fname { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.folder .fcount { margin-left: 4px; flex: 0 0 auto; }
+.folder.collapsed .fname { font-style: normal; }
+
+/* 悬停才显现的重命名 / 删除操作（此前缺样式，曾为裸按钮） */
+.fop { display: none; gap: 2px; flex: 0 0 auto; }
+.folder:hover .fop { display: inline-flex; }
+.fmini {
+  border: none;
+  background: transparent;
+  color: var(--text-mut);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 6px;
+  transition: background .12s ease, color .12s ease;
+}
+.fmini:hover { background: var(--surface-muted); color: var(--text); }
+.fmini.danger:hover { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+
+/* 卡片拖拽归类视觉 */
+.card[draggable="true"] { cursor: grab; }
+.card.dragging { opacity: 0.45; cursor: grabbing; }
+.folder.drag-over .fname { color: var(--primary); font-weight: 600; }

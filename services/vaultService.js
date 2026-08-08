@@ -243,6 +243,25 @@
       return all.filter((e) => e.value && e.value.libraryId === libraryId).map((e) => e.value);
     }
 
+    /**
+     * 全库各资料库的条目计数（按文件夹），用于侧栏准确显示数量。
+     * 关键：应用只载入「当前资料库」的条目到 store.items，因此不能为每个资料库用 store.items 计数，
+     * 必须扫描全量用户数据，否则非激活资料库的数量会恒为 0。
+     */
+    async stats() {
+      const all = (await this.storage.allUser()).map((e) => e.value).filter(Boolean);
+      const out = {};
+      for (const it of all) {
+        const libId = it.libraryId;
+        if (!libId) continue;
+        const lib = (out[libId] = out[libId] || { total: 0, folders: {} });
+        lib.total++;
+        const f = it.folderId || 'root';
+        lib.folders[f] = (lib.folders[f] || 0) + 1;
+      }
+      return out;
+    }
+
     // ================= 条目创建 =================
     /**
      * 创建条目。原始数据一经写入即视为**不可变证据**：记录来源、来源时间、MIME 与 SHA-256 指纹。
