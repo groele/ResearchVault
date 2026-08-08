@@ -1,49 +1,49 @@
-/* ResearchVault · 视觉与空间布局 — 极简、现代、高清晰三栏响应式
-   设计语言：Plus Jakarta Sans (标题) + Inter (UI) + Fira Code (等宽/指纹) */
+/* ResearchVault · 现代、高清晰三栏响应式
+   设计语言：系统原生高清晰字体 (PingFang SC / Microsoft YaHei / Segoe UI / SF Pro) */
 :root {
-  --bg: #f6f8fb;
+  --bg: #f8fafc;
   --surface: #ffffff;
   --surface-card: #ffffff;
   --surface-subtle: #f1f5f9;
   --surface-muted: #e2e8f0;
-  --border: #e2e8f0;
-  --border-hover: #cbd5e1;
+  --border: #cbd5e1;
+  --border-hover: #4f46e5;
   --text: #0f172a;
-  --text-soft: #475569;
-  --text-mut: #94a3b8;
+  --text-soft: #334155;
+  --text-mut: #64748b;
   --primary: #4f46e5;
-  --primary-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+  --primary-gradient: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%);
   --primary-soft: rgba(79, 70, 229, 0.08);
   --primary-glow: rgba(79, 70, 229, 0.2);
-  --accent: #ec4899;
-  --star: #f59e0b;
-  --proc: #10b981;
-  --danger: #ef4444;
-  --radius: 12px;
-  --radius-sm: 8px;
+  --accent: #d946ef;
+  --star: #d97706;
+  --proc: #059669;
+  --danger: #dc2626;
+  --radius: 10px;
+  --radius-sm: 6px;
   --radius-pill: 9999px;
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.06);
-  --shadow-md: 0 4px 14px -1px rgba(15, 23, 42, 0.08);
-  --shadow-lg: 0 12px 32px -4px rgba(15, 23, 42, 0.16);
-  --font-display: "Plus Jakarta Sans", "PingFang SC", system-ui, sans-serif;
-  --font-body: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  --font-mono: "Fira Code", "JetBrains Mono", ui-monospace, monospace;
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.1);
+  --shadow-lg: 0 10px 28px rgba(15, 23, 42, 0.15);
+  --font-display: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "Cascadia Code", Consolas, "PingFang SC", "Microsoft YaHei", monospace;
 }
 
 [data-theme="dark"] {
-  --bg: #090d16;
+  --bg: #0b0f19;
   --surface: #111827;
   --surface-card: #1f2937;
   --surface-subtle: #1e293b;
   --surface-muted: #334155;
   --border: #374151;
-  --border-hover: #6366f1;
+  --border-hover: #818cf8;
   --text: #f8fafc;
-  --text-soft: #94a3b8;
-  --text-mut: #64748b;
+  --text-soft: #cbd5e1;
+  --text-mut: #94a3b8;
   --primary: #6366f1;
   --primary-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-  --primary-soft: rgba(99, 102, 241, 0.16);
+  --primary-soft: rgba(99, 102, 241, 0.18);
   --primary-glow: rgba(99, 102, 241, 0.35);
   --star: #fbbf24;
   --proc: #34d399;
@@ -60,7 +60,8 @@ body {
   background: var(--bg);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
-  letter-spacing: -0.01em;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 /* ---------- 整体三栏布局 ---------- */
@@ -94,21 +95,19 @@ body {
   align-items: center;
   gap: 10px;
   font-family: var(--font-display);
-  font-weight: 800;
+  font-weight: 700;
   font-size: 16px;
-  letter-spacing: -0.02em;
 }
 
 .brand .logo {
   width: 32px;
   height: 32px;
-  border-radius: 9px;
+  border-radius: 8px;
   background: var(--primary-gradient);
   display: grid;
   place-items: center;
   color: #fff;
   font-size: 15px;
-  box-shadow: var(--shadow-sm);
 }
 
 .side-scroll {
@@ -121,7 +120,7 @@ body {
   font-family: var(--font-display);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-mut);
   margin: 10px 6px 6px;
@@ -134,9 +133,7 @@ body {
   cursor: pointer;
   color: var(--primary);
   font-size: 15px;
-  transition: transform 0.15s ease;
 }
-.section-title .add:hover { transform: scale(1.2); }
 
 /* 资料库卡片 */
 .lib-card {
@@ -147,20 +144,17 @@ body {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s ease;
   background: var(--surface-subtle);
   margin-bottom: 5px;
 }
 
 .lib-card:hover {
   border-color: var(--primary);
-  transform: translateX(2px);
 }
 
 .lib-card.active {
   border-color: var(--primary);
   background: var(--primary-soft);
-  box-shadow: var(--shadow-sm);
 }
 
 .lib-card .dot {
@@ -193,7 +187,6 @@ body {
   cursor: pointer;
   font-size: 13px;
   color: var(--text-soft);
-  transition: all 0.14s ease;
   margin-bottom: 2px;
   position: relative;
 }
@@ -232,8 +225,7 @@ body {
 
 .folder.drag-over {
   background: var(--primary-soft) !important;
-  outline: 2px dashed var(--primary);
-  outline-offset: -2px;
+  border: 2px dashed var(--primary);
 }
 
 .side-foot {
@@ -255,7 +247,6 @@ body {
   cursor: pointer;
   font-size: 11.5px;
   font-weight: 500;
-  transition: 0.15s ease;
 }
 .foot-btn:hover { border-color: var(--primary); color: var(--primary); }
 
@@ -265,6 +256,7 @@ body {
   flex-direction: column;
   min-width: 0;
   background: var(--bg);
+  position: relative;
 }
 
 .topbar {
@@ -300,7 +292,6 @@ body {
   padding: 6px 12px;
   width: 300px;
   max-width: 36vw;
-  transition: all 0.15s ease;
 }
 .search:focus-within {
   border-color: var(--primary);
@@ -320,7 +311,7 @@ body {
   font-family: var(--font-mono);
   color: var(--text-mut);
   border: 1px solid var(--border);
-  border-radius: 5px;
+  border-radius: 4px;
   padding: 1px 5px;
   background: var(--surface-card);
 }
@@ -336,7 +327,6 @@ body {
   display: grid;
   place-items: center;
   font-size: 14px;
-  transition: 0.15s ease;
 }
 .icon-btn:hover { border-color: var(--primary); color: var(--primary); }
 
@@ -380,7 +370,6 @@ body {
   cursor: pointer;
   font-size: 12px;
   font-weight: 500;
-  transition: all 0.12s ease;
 }
 .seg button.active {
   background: var(--surface-card);
@@ -401,14 +390,12 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  transition: all 0.14s ease;
 }
 .btn:hover { border-color: var(--primary); color: var(--primary); }
 .btn.primary {
   background: var(--primary-gradient);
   color: #fff;
   border: none;
-  box-shadow: var(--shadow-sm);
 }
 .btn.primary:hover { filter: brightness(1.06); }
 .btn.sm { padding: 5px 10px; font-size: 12px; }
@@ -444,7 +431,6 @@ body {
   padding: 14px;
   position: relative;
   cursor: pointer;
-  transition: all 0.15s ease;
   min-height: 120px;
   box-shadow: var(--shadow-sm);
 }
@@ -452,13 +438,12 @@ body {
 .card.dragging { opacity: 0.4; }
 
 .card:hover {
-  transform: translateY(-2px);
   box-shadow: var(--shadow-md);
   border-color: var(--border-hover);
 }
 .card.focused {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px var(--primary-glow), var(--shadow-sm);
+  box-shadow: 0 0 0 2px var(--primary-glow);
 }
 .card.starred .star { color: var(--star); }
 
@@ -475,7 +460,7 @@ body {
 }
 .card .src { font-size: 10px; color: var(--text-mut); text-transform: none; }
 .card .badge.proc {
-  background: rgba(16, 185, 129, 0.12);
+  background: rgba(5, 150, 105, 0.12);
   color: var(--proc);
   border-radius: var(--radius-pill);
   padding: 1px 7px;
@@ -505,15 +490,13 @@ body {
   display: flex;
   gap: 5px;
   opacity: 0;
-  transform: translateY(3px);
-  transition: 0.14s ease;
   pointer-events: none;
 }
-.card:hover .card-actions { opacity: 1; transform: translateY(0); pointer-events: auto; }
+.card:hover .card-actions { opacity: 1; pointer-events: auto; }
 .card .card-actions button {
   width: 28px;
   height: 28px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border);
   background: var(--surface-card);
   box-shadow: var(--shadow-sm);
@@ -525,11 +508,8 @@ body {
 .skeleton {
   height: 120px;
   border-radius: var(--radius);
-  background: linear-gradient(90deg, var(--surface-subtle) 25%, var(--surface-card) 37%, var(--surface-subtle) 63%);
-  background-size: 400% 100%;
-  animation: shimmer 1.3s infinite;
+  background: var(--surface-subtle);
 }
-@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }
 
 .empty { text-align: center; color: var(--text-soft); padding: 50px 0; }
 .empty .big { font-size: 38px; margin-bottom: 8px; }
@@ -556,18 +536,19 @@ body {
 }
 
 .dropzone {
+  display: none;
   position: absolute;
   inset: 0;
-  background: rgba(79, 70, 229, 0.1);
+  background: rgba(79, 70, 229, 0.08);
   border: 3px dashed var(--primary);
+  z-index: 40;
+  pointer-events: none;
+}
+.dropzone.show, .dropzone.active {
   display: grid;
   place-items: center;
-  z-index: 40;
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.15s ease;
+  pointer-events: auto;
 }
-.dropzone.active { opacity: 1; pointer-events: auto; }
 .dz-inner {
   font-family: var(--font-display);
   font-size: 16px;
@@ -644,8 +625,8 @@ body {
 .d-del { color: var(--danger); font-weight: 700; }
 .diff-body { display: flex; flex-direction: column; gap: 1px; }
 .dl { display: flex; padding: 2px 6px; border-radius: 3px; white-space: pre-wrap; word-break: break-all; }
-.dl.add { background: rgba(16, 185, 129, 0.12); color: var(--proc); }
-.dl.del { background: rgba(239, 68, 68, 0.12); color: var(--danger); text-decoration: line-through; }
+.dl.add { background: rgba(5, 150, 105, 0.12); color: var(--proc); }
+.dl.del { background: rgba(220, 38, 38, 0.12); color: var(--danger); text-decoration: line-through; }
 .dl.same { color: var(--text-soft); }
 .dm { width: 16px; font-weight: 700; user-select: none; }
 .dt { flex: 1; }
@@ -678,10 +659,8 @@ body {
   font-size: 13px;
   font-weight: 600;
   box-shadow: var(--shadow-lg);
-  animation: pop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
   z-index: 90;
 }
-@keyframes pop { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
 .overlay {
   position: fixed;
@@ -690,9 +669,7 @@ body {
   display: grid;
   place-items: center;
   z-index: 80;
-  animation: fade 0.15s ease;
 }
-@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
 .modal {
   background: var(--surface-card);
@@ -702,7 +679,6 @@ body {
   max-width: 92vw;
   box-shadow: var(--shadow-lg);
   border: 1px solid var(--border);
-  animation: pop 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .modal h3 { font-family: var(--font-display); font-size: 17px; margin: 0 0 12px; }
 .field label { font-size: 11.5px; font-weight: 600; color: var(--text-soft); margin-bottom: 5px; }
@@ -716,7 +692,6 @@ body {
   font-size: 13px;
   outline: none;
   font-family: inherit;
-  transition: border-color 0.14s ease;
 }
 .field input:focus, .field textarea:focus { border-color: var(--primary); }
 
@@ -728,7 +703,6 @@ body {
   z-index: 85;
   display: flex;
   justify-content: flex-end;
-  animation: fade 0.15s ease;
 }
 .drawer-content {
   width: 420px;
