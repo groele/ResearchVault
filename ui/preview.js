@@ -39,6 +39,7 @@
   }
   function inline(s) {
     return escapeHtml(s)
+      .replace(/\[\[(.*?)\]\]/g, '<span class="wiki-link" data-wiki="$1" title="点击联动引用条目">🔗 $1</span>')
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/`(.+?)`/g, '<code>$1</code>');
   }

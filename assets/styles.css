@@ -660,6 +660,53 @@ body {
   color: var(--text);
 }
 
+/* 双向 Wiki 链接 */
+.wiki-link {
+  color: var(--primary);
+  background: var(--primary-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px dashed var(--primary);
+  transition: all 0.15s ease;
+}
+.wiki-link:hover {
+  background: var(--primary);
+  color: #fff;
+}
+
+/* 演进拓扑图 DAG 节点样式 */
+.dag-canvas {
+  width: 100%;
+  min-height: 420px;
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  position: relative;
+  overflow: auto;
+  padding: 24px;
+}
+.dag-node {
+  background: var(--surface-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  box-shadow: var(--shadow-sm);
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.dag-node:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary);
+}
+
 .pv-empty { margin: auto; text-align: center; color: var(--text-soft); font-size: 13.5px; line-height: 1.8; }
 .pv-empty small { color: var(--text-mut); }
 .pv-head { padding: 14px 18px 8px; border-bottom: 1px solid var(--border); }

@@ -374,12 +374,25 @@ bus.on(EVENTS.VAULT_ITEM_CREATED, () => { createdFired = true; });
     ok('updateItem 成功行内更新资产标题、扩展标签与科研DOI', updatedPy.title === '分布式模型训练入口脚本.py' && updatedPy.tags.includes('distributed') && updatedPy.researchMeta?.doi === '10.1038/s41586-024-0000-0');
   }
 
+  // 37) 科研数据演化拓扑图生成 (getLineageGraph)
+  const lineage = await vault.getLineageGraph(lib2.id);
+  ok('getLineageGraph 节点集包含当前项目全量资产', lineage.nodes.length >= 2);
+
+  // 38) 双向引用 (getBacklinks) 测试
+  const wikiNote = await vault.createItem({
+    title: '基准实验笔记', kind: 'note', libraryId: lib2.id, folderId: 'root',
+    raw: { content: '本笔记引用 [[分布式模型训练入口脚本.py]] 数据进行评测。' },
+  });
+  const backlinks = await vault.getBacklinks(itemPy.id);
+  ok('getBacklinks 正确检出引用当前条目的反向关联笔记', backlinks.length >= 1 && backlinks.some((b) => b.id === wikiNote.id));
+
   // 清理衍生测试数据
   await vault.deleteItem(dup1.id);
   await vault.deleteItem(dup2.id);
   await vault.deleteItem(titleDup1.id);
   await vault.deleteItem(titleDup2.id);
   await vault.deleteItem(rmItem.id);
+  await vault.deleteItem(wikiNote.id);
   if (itemPy) await vault.deleteItem(itemPy.id);
   if (itemPt) await vault.deleteItem(itemPt.id);
 

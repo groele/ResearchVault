@@ -791,6 +791,62 @@
       await this._audit('item.openWith', { itemId: id, app: appType, summary: `调用外部程序 [${res.appName || appType}] 打开「${item.title}」` });
       return { ...res, item };
     }
+
+    /** 计算资料库内部条目演进拓扑关系（用于 DAG Lineage Graph 拓扑流图） */
+    async getLineageGraph(libraryId) {
+      const items = await this.allInLibrary(libraryId);
+      const itemMap = new Map(items.map((i) => [i.id, i]));
+      const titleMap = new Map(items.map((i) => [i.title?.toLowerCase(), i]));
+
+      const nodes = items.map((i) => ({
+        id: i.id,
+        label: i.title || i.name,
+        kind: i.kind,
+        starred: !!i.starred,
+        folderId: i.folderId || 'root',
+        reproducibility: i.researchMeta?.reproducibility || 'unverified',
+        vcount: (i.processedVersions || []).length,
+      }));
+
+      const edges = [];
+      const addedEdge = new Set();
+
+      for (const i of items) {
+        const text = (i.raw?.content || '') + ' ' + (i.processed?.content || '');
+        const wikiMatches = text.match(/\[\[(.*?)\]\]/g) || [];
+        for (const m of wikiMatches) {
+          const targetName = m.slice(2, -2).trim().toLowerCase();
+          const target = titleMap.get(targetName) || itemMap.get(targetName);
+          if (target && target.id !== i.id) {
+            const key = `${i.id}->${target.id}`;
+            if (!addedEdge.has(key)) {
+              addedEdge.add(key);
+              edges.push({ source: i.id, target: target.id, type: 'wiki' });
+            }
+          }
+        }
+      }
+
+      return { nodes, edges };
+    }
+
+    /** 检索当前条目的反向引用 (Backlinks) */
+    async getBacklinks(itemId) {
+      const target = await this.storage.user(itemId);
+      if (!target) return [];
+      const items = await this.allInLibrary(target.libraryId);
+      const targetTitle = (target.title || '').toLowerCase();
+      const backlinks = [];
+
+      for (const i of items) {
+        if (i.id === itemId) continue;
+        const text = ((i.raw?.content || '') + ' ' + (i.processed?.content || '')).toLowerCase();
+        if (text.includes(`[[${targetTitle}]]`) || text.includes(`[[${itemId.toLowerCase()}]]`)) {
+          backlinks.push(i);
+        }
+      }
+      return backlinks;
+    }
   }
 
   global.VaultService = VaultService;

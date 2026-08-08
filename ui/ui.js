@@ -63,16 +63,14 @@
       qs('btnImport').addEventListener('click', () => this.bus.emit('ui:import:pick', {}));
       qs('btnImportFolder').addEventListener('click', () => this.bus.emit('ui:import:dir', {}));
       qs('btnNewFolder').addEventListener('click', () => this._openNewFolder());
+      qs('btnLineage').addEventListener('click', () => this._openLineageModal());
       qs('btnCmd').addEventListener('click', () => this._openCmdPalette());
-      qs('btnDensity').addEventListener('click', () => {
-        const d = this.store.getState().density === 'compact' ? 'comfortable' : 'compact';
-        this.bus.emit(global.EVENTS.UI_DENSITY, { density: d });
-      });
       qs('btnTheme').addEventListener('click', () => {
         const t = this.store.getState().theme === 'dark' ? 'light' : 'dark';
         this.bus.emit(global.EVENTS.UI_THEME, { theme: t });
       });
       qs('btnLock').addEventListener('click', () => this._openCrypto());
+      qs('btnHelp').addEventListener('click', () => this._openHelpModal());
       qs('btnExport').addEventListener('click', () => this.bus.emit(global.EVENTS.UI_EXPORT, {}));
       qs('btnNewLib').addEventListener('click', () => this._openNewLib());
       qs('btnSettings').addEventListener('click', () =>
@@ -188,6 +186,15 @@
             if (resizer) resizer.style.display = isHidden ? 'block' : 'none';
             this.store.dispatch({ type: 'TOAST', toast: isHidden ? '📖 已展开侧栏预览 (Ctrl+P)' : '✕ 已收起侧栏预览 (Ctrl+P)' });
           }
+          return;
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
+          e.preventDefault();
+          this._openLineageModal();
+          return;
+        }
+        if (e.key === '?' || e.key === 'F1') {
+          e.preventDefault();
+          this._openHelpModal();
           return;
         }
         const t = e.target;
@@ -1296,6 +1303,69 @@
           }
         });
       }
+    }
+
+    async _openLineageModal() {
+      const s = this.store.getState();
+      const libId = s.activeLibraryId;
+      const graph = await global.__vault.getLineageGraph(libId);
+
+      const nodeHtml = graph.nodes.map((n, i) => {
+        const top = 30 + (i % 6) * 60;
+        const left = 20 + Math.floor(i / 6) * 220;
+        return `
+          <div class="dag-node" style="position:absolute;top:${top}px;left:${left}px;" data-dagnode="${n.id}">
+            <span>${kindIcon(n.kind)}</span>
+            <span>${escapeHtml(n.label)}</span>
+            <span class="badge sm">${n.reproducibility === 'reproduced' ? '✔' : '⏳'}</span>
+          </div>`;
+      }).join('');
+
+      this._modal(`
+        <div style="width:780px;max-width:90vw;">
+          <h3>🌐 科研数据演化拓扑图 (Lineage Graph)</h3>
+          <p class="muted">实时计算当前资料库内数据节点、文件依赖与双向 [[Wiki]] 关联结构</p>
+          <div class="dag-canvas" style="position:relative;height:380px;">
+            ${nodeHtml || '<p class="muted">当前资料库尚无资产节点</p>'}
+          </div>
+          <div class="modal-actions">
+            <span class="muted" style="margin-right:auto;font-size:12px;">共 ${graph.nodes.length} 个节点，${graph.edges.length} 条演进关联边</span>
+            <button class="btn primary" id="dagClose">关闭</button>
+          </div>
+        </div>`);
+
+      document.getElementById('dagClose').onclick = () => this._closeModal();
+      document.querySelectorAll('[data-dagnode]').forEach((el) => {
+        el.onclick = () => {
+          this.store.dispatch({ type: 'SET_FOCUSED', id: el.dataset.dagnode });
+          this._closeModal();
+        };
+      });
+    }
+
+    _openHelpModal() {
+      this._modal(`
+        <div style="width:580px;max-width:90vw;">
+          <h3>⌨ ResearchVault 快捷键速查中心</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0;font-size:13px;">
+            <div><span class="kbd">Ctrl + K</span> 命令快捷面板</div>
+            <div><span class="kbd">Ctrl + P</span> 展开/收起侧边栏预览</div>
+            <div><span class="kbd">Ctrl + G</span> 科研演进拓扑图</div>
+            <div><span class="kbd">/</span> 聚焦全局搜索框</div>
+            <div><span class="kbd">j</span> / <span class="kbd">↓</span> 选中下一条目</div>
+            <div><span class="kbd">k</span> / <span class="kbd">↑</span> 选中上一条目</div>
+            <div><span class="kbd">Space</span> 勾选/取消勾选多选</div>
+            <div><span class="kbd">x</span> 收藏/取消收藏条目</div>
+            <div><span class="kbd">Enter</span> 聚焦条目细节</div>
+            <div><span class="kbd">Del</span> 删除当前条目</div>
+            <div><span class="kbd">Esc</span> 关闭浮窗/模态框</div>
+            <div><span class="kbd">?</span> / <span class="kbd">F1</span> 快捷键帮助</div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn primary" id="helpOk">理解并关闭</button>
+          </div>
+        </div>`);
+      document.getElementById('helpOk').onclick = () => this._closeModal();
     }
 
     _closeCmdPalette() {
