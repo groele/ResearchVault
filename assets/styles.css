@@ -54,6 +54,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
 body {
   font-family: var(--font-body);
@@ -697,12 +698,15 @@ body {
 
 /* 侧滑抽屉 */
 .drawer-wrap {
+  display: none;
   position: fixed;
   inset: 0;
   background: rgba(10, 15, 25, 0.4);
   z-index: 85;
-  display: flex;
   justify-content: flex-end;
+}
+.drawer-wrap:not([hidden]) {
+  display: flex;
 }
 .drawer-content {
   width: 420px;
