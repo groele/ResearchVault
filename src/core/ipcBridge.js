@@ -226,8 +226,12 @@
     }
   }
 
-  // 默认使用 Web 模拟；后续无缝替换为 Electron：
-  const DEFAULT_BRIDGE = new MockIpcBridge();
+  // ============ 双态自适应通道 (Dual-Mode Auto-Detection) ============
+  // 在 Electron 桌面环境下 window.electronAPI 由 preload 注入，自动切换为原生模式；
+  // 在纯浏览器/Web 环境下自动降级为 MockIpcBridge，无需任何手动切换。
+  const DEFAULT_BRIDGE = (typeof global.electronAPI !== 'undefined')
+    ? new ElectronIpcBridge(global.electronAPI)
+    : new MockIpcBridge();
 
   global.CHANNELS = CHANNELS;
   global.ipcBridge = DEFAULT_BRIDGE;

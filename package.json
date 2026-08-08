@@ -1,0 +1,41 @@
+{
+  "name": "research-vault",
+  "version": "5.0.0",
+  "description": "ResearchVault - Scientific Knowledge & Data Governance Workstation",
+  "main": "electron-main.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "serve": "node scripts/serve.mjs",
+    "test": "node scripts/arch-test.mjs",
+    "build:desktop": "node scripts/build-desktop.mjs",
+    "pack": "electron-builder --win portable",
+    "dist": "electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "com.researchvault.app",
+    "productName": "ResearchVault",
+    "copyright": "Copyright © 2026 ResearchVault",
+    "files": [
+      "src/**/*",
+      "index.html",
+      "app.js",
+      "electron-main.mjs",
+      "electron-preload.js"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
+  },
+  "author": "ResearchVault Team",
+  "license": "MIT"
+}
