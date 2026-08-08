@@ -59,10 +59,23 @@
     _bindStatic() {
       qs('searchInput').addEventListener('input', (e) =>
         this.store.dispatch({ type: 'SET_QUERY', query: e.target.value }));
-      qs('btnNew').addEventListener('click', () => this._openCreate());
-      qs('btnImport').addEventListener('click', () => this.bus.emit('ui:import:pick', {}));
-      qs('btnImportFolder').addEventListener('click', () => this.bus.emit('ui:import:dir', {}));
-      qs('btnNewFolder').addEventListener('click', () => this._openNewFolder());
+      const btnNew = qs('btnNew');
+      const newMenu = qs('newMenu');
+      if (btnNew && newMenu) {
+        btnNew.addEventListener('click', (e) => {
+          e.stopPropagation();
+          newMenu.hidden = !newMenu.hidden;
+        });
+        document.addEventListener('click', () => { newMenu.hidden = true; });
+      }
+      qs('menuNewNote')?.addEventListener('click', () => this._openCreate());
+      qs('menuImportFile')?.addEventListener('click', () => this.bus.emit('ui:import:pick', {}));
+      qs('menuImportDir')?.addEventListener('click', () => this.bus.emit('ui:import:dir', {}));
+      qs('menuNewFolder')?.addEventListener('click', () => this._openNewFolder());
+      qs('btnNew')?.addEventListener('click', () => {});
+      qs('btnImport')?.addEventListener('click', () => this.bus.emit('ui:import:pick', {}));
+      qs('btnImportFolder')?.addEventListener('click', () => this.bus.emit('ui:import:dir', {}));
+      qs('btnNewFolder')?.addEventListener('click', () => this._openNewFolder());
       qs('btnLineage').addEventListener('click', () => this._openLineageModal());
       qs('btnCmd').addEventListener('click', () => this._openCmdPalette());
       qs('btnTheme').addEventListener('click', () => {
@@ -187,6 +200,7 @@
             this.store.dispatch({ type: 'TOAST', toast: isHidden ? '📖 已展开侧栏预览 (Ctrl+P)' : '✕ 已收起侧栏预览 (Ctrl+P)' });
           }
           return;
+        }
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') {
           e.preventDefault();
           this._openLineageModal();
@@ -498,12 +512,39 @@
 
       // 空状态：区分"搜索/筛选无果"与"真无条目"
       if (!s.filtered.length) {
-        const filtered = s.query || s.filters.kind !== 'all' || s.filters.starred || s.filters.processed !== 'all';
+        const filtered = s.query || s.filters.kind !== 'all' || s.filters.starred || s.filters.processed !== 'all' || s.filters.reproducibility !== 'all';
         const emptySig = 'empty:' + (filtered ? 'f' : '0') + ':' + (s.query || '');
         if (this._sig.list !== emptySig) {
-          wrap.innerHTML = filtered
-            ? `<div class="empty"><div class="big">🔍</div><div>未找到匹配的条目</div><div class="muted">试试调整搜索词或筛选条件${s.query ? `：「${escapeHtml(s.query)}」` : ''}</div></div>`
-            : `<div class="empty"><div class="big">📚</div><div>当前视图暂无条目</div><div class="muted">点「＋ 新建」或把文件拖入此区域导入</div></div>`;
+          if (filtered) {
+            wrap.innerHTML = `<div class="empty"><div class="big">🔍</div><div>未找到匹配的资产条目</div><div class="muted">试试重置筛选条件或调整关键词${s.query ? `：「${escapeHtml(s.query)}」` : ''}</div></div>`;
+          } else {
+            wrap.innerHTML = `
+              <div class="empty-hero">
+                <div class="hero-icon">🔬</div>
+                <h3 class="hero-title">欢迎使用 ResearchVault 科研项目综合管理系统</h3>
+                <p class="hero-subtitle">课题数据、代码脚本、文献与模型一体化管理，支持不可变指纹链与智能分类打标签</p>
+                <div class="hero-cards">
+                  <div class="hero-card" id="heroNewNote">
+                    <div class="hc-icon">📝</div>
+                    <div class="hc-title">新建科研笔记</div>
+                    <div class="hc-desc">记录实验思路、算法公式与推导步骤</div>
+                  </div>
+                  <div class="hero-card" id="heroImportDir">
+                    <div class="hc-icon">📁</div>
+                    <div class="hc-title">导入课题数据集 / 文件夹</div>
+                    <div class="hc-desc">选择文件夹，自动按扩展名归类打标签</div>
+                  </div>
+                  <div class="hero-card" id="heroImportFile">
+                    <div class="hc-icon">💻</div>
+                    <div class="hc-title">导入代码或模型权重</div>
+                    <div class="hc-desc">支持 Python、PyTorch 权重、PDF 文献</div>
+                  </div>
+                </div>
+              </div>`;
+            qs('heroNewNote')?.addEventListener('click', () => this._openCreate());
+            qs('heroImportDir')?.addEventListener('click', () => this.bus.emit('ui:import:dir', {}));
+            qs('heroImportFile')?.addEventListener('click', () => this.bus.emit('ui:import:pick', {}));
+          }
           this._sig.list = emptySig;
         }
         return;

@@ -48,13 +48,23 @@
       </div>
 
       <div class="toolbar">
-        <button class="btn primary sm" id="btnNew">＋ 新建</button>
-        <button class="btn sm" id="btnImport" title="导入单/多个文件">⬆ 导入文件</button>
-        <button class="btn sm" id="btnImportFolder" title="选择文件夹并按后缀自动分类与打标签">📁 导入文件夹</button>
-        <button class="btn sm" id="btnNewFolder">📂 子项目</button>
+        <div class="new-dropdown">
+          <button class="btn primary sm" id="btnNew">＋ 新建资产 ▾</button>
+          <div class="new-menu" id="newMenu" hidden>
+            <button id="menuNewNote">📝 新建笔记 / 条目</button>
+            <button id="menuImportFile">⬆ 导入单 / 多文件</button>
+            <button id="menuImportDir">📁 导入文件夹 (自动分类打标签)</button>
+            <button id="menuNewFolder">📂 新建子项目文件夹</button>
+          </div>
+        </div>
+        <button id="btnImport" hidden></button>
+        <button id="btnImportFolder" hidden></button>
+        <button id="btnNewFolder" hidden></button>
+        
         <span class="sep"></span>
-        <select class="sel" id="selKind" title="按类型筛选">
-          <option value="all">全部类型</option>
+
+        <select class="sel" id="selKind" title="按资产类型筛选">
+          <option value="all">全类型</option>
           <option value="code">💻 代码</option>
           <option value="model">🤖 模型</option>
           <option value="note">📝 笔记</option>
@@ -64,9 +74,9 @@
           <option value="other">📦 其他</option>
         </select>
         <select class="sel" id="selProcessed" title="按处理状态筛选">
-          <option value="all">全部状态</option>
-          <option value="yes">已后处理</option>
-          <option value="no">仅原始</option>
+          <option value="all">全处理状态</option>
+          <option value="yes">⚙ 已后处理</option>
+          <option value="no">📄 仅原始</option>
         </select>
         <select class="sel" id="selRepro" title="按可复现状态筛选">
           <option value="all">全复现状态</option>
@@ -75,20 +85,25 @@
           <option value="failed">❌ 不可复现</option>
         </select>
         <button class="btn sm toggle" id="btnStarFilter" title="只看收藏">☆ 收藏</button>
+        
+        <span class="sep"></span>
+
         <select class="sel" id="selSort" title="排序">
           <option value="created_desc">最新创建</option>
           <option value="created_asc">最早创建</option>
           <option value="updated_desc">最近更新</option>
           <option value="title_asc">标题 A→Z</option>
         </select>
+
         <div class="spacer"></div>
+
         <div class="seg" id="viewSeg" title="视图模式：原始 ↔ 后处理 对比 / 仅原始 / 仅后处理">
           <button data-view="split" class="active">对比</button>
           <button data-view="raw">原始</button>
           <button data-view="processed">后处理</button>
         </div>
-        <button class="btn sm" id="btnDensity">▦ 舒适</button>
-        <button class="btn sm" id="btnExport">⬇ 导出</button>
+        <button class="btn sm" id="btnDensity" title="切换排版密度">▦ 舒适</button>
+        <button class="btn sm" id="btnExport" title="全库导出备份">⬇ 导出</button>
       </div>
 
       <div class="bulkbar" id="bulkBar" hidden></div>
