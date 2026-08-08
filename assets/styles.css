@@ -319,16 +319,19 @@ body {
 }
 
 .icon-btn {
-  width: 32px;
+  min-width: 32px;
   height: 32px;
+  padding: 0 6px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface-card);
   color: var(--text-soft);
   cursor: pointer;
-  display: grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   font-size: 14px;
+  white-space: nowrap;
 }
 .icon-btn:hover { border-color: var(--primary); color: var(--primary); }
 

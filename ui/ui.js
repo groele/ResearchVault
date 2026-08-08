@@ -375,7 +375,8 @@
       qs('crumb').innerHTML = `<span class="c-lib">${escapeHtml(lib?.icon || '📁')} ${escapeHtml(lib?.name || '资料库')}</span>` +
         path.map((f) => `<span class="c-sep">/</span><span class="c-f ${f.id === s.activeFolderId ? 'cur' : ''}">${escapeHtml(f.name)}</span>`).join('');
       qs('btnDensity').textContent = s.density === 'compact' ? '☰ 紧凑' : '▦ 舒适';
-      qs('btnLock').textContent = s.cryptoLocked ? '🔓 加密关' : '🔒 加密开';
+      qs('btnLock').textContent = s.cryptoLocked ? '🔓' : '🔒';
+      qs('btnLock').title = s.cryptoLocked ? '加密存储：未锁（点击解锁/设置密码）' : '加密存储：已锁定';
       qs('btnLock').classList.toggle('on', !s.cryptoLocked);
     }
     _folderPath(folders, activeId) {
