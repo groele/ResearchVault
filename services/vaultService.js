@@ -532,17 +532,45 @@
       this.bus.emit(global.EVENTS.VAULT_ITEM_DELETED, { id });
     }
 
-    // ================= 批量操作 =================
-    async bulk(action, ids, payload) {
+    // ================= 批量与健康修复 =================
+    async bulk(action, ids, payload = {}) {
       const out = [];
       for (const id of ids) {
         if (action === 'delete') { await this.deleteItem(id); out.push(id); }
         else if (action === 'star') { out.push(await this.updateItem(id, { starred: !!payload.on })); }
         else if (action === 'tag') { out.push(await this.tagItem(id, payload.tag)); }
+        else if (action === 'untag') { out.push(await this.untagItem(id, payload.tag)); }
+        else if (action === 'kind') { out.push(await this.updateItem(id, { kind: payload.kind })); }
         else if (action === 'move') { out.push(await this.moveItem(id, payload.folderId)); }
       }
       this.bus.emit(global.EVENTS.VAULT_BULK_DONE, { action, ids, count: out.length });
       return out;
+    }
+
+    /** 自愈修复孤立条目：重置非合法文件夹引用的条目为 root */
+    async repairOrphanedItems(libraryId) {
+      const reg = await this._reg();
+      libraryId = libraryId || reg.activeId;
+      const lib = reg.libraries.find((l) => l.id === libraryId);
+      if (!lib) return 0;
+      const validFolderIds = new Set((lib.folders || []).map((f) => f.id));
+      validFolderIds.add('root');
+
+      const items = await this.allInLibrary(libraryId);
+      let count = 0;
+      for (const item of items) {
+        if (item.folderId && !validFolderIds.has(item.folderId)) {
+          item.folderId = 'root';
+          item.updatedAt = Date.now();
+          await this.storage.user(item.id, this._project(item));
+          count++;
+        }
+      }
+      if (count > 0) {
+        await this._audit(AUDIT_ACTIONS.UPDATE, { summary: `自愈修复：重置 ${count} 个孤立条目回到根目录` });
+        await this.loadItems(libraryId);
+      }
+      return count;
     }
 
     // ================= 加密 =================
@@ -573,6 +601,25 @@
       };
       await this._audit(AUDIT_ACTIONS.EXPORT, { summary: `导出 ${all.length} 条目 + ${audit.length} 条审计（清单指纹 ${manifestHash.slice(0, 12)}…）` });
       return pkg;
+    }
+
+    /** 导出 CSV 表格清单 */
+    async exportCSV() {
+      const all = (await this.storage.allUser()).map((e) => e.value).filter(Boolean);
+      const headers = ['id', 'title', 'kind', 'tags', 'libraryId', 'folderId', 'createdAt', 'updatedAt', 'rawHash'];
+      const rows = all.map((it) => [
+        it.id,
+        `"${(it.title || '').replace(/"/g, '""')}"`,
+        it.kind || 'note',
+        `"${(it.tags || []).join(',')}"`,
+        it.libraryId || '',
+        it.folderId || 'root',
+        it.createdAt || '',
+        it.updatedAt || '',
+        it.raw?.hash || '',
+      ].join(','));
+      await this._audit(AUDIT_ACTIONS.EXPORT, { summary: `导出 CSV 表格清单（共 ${all.length} 条目）` });
+      return [headers.join(','), ...rows].join('\n');
     }
 
     /**

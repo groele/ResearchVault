@@ -204,6 +204,24 @@
         toast('已导出 JSON（含完整处理链与审计日志）');
       } catch (e) { err(e); }
     });
+    bus.on('ui:export:csv', async () => {
+      try {
+        const csv = await vault.exportCSV();
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'research-vault-manifest.csv';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(a.href);
+        toast('已导出 CSV 表格数据清单');
+      } catch (e) { err(e); }
+    });
+    bus.on('ui:repair:orphans', async () => {
+      try {
+        const count = await vault.repairOrphanedItems();
+        toast(count > 0 ? `已自愈修复 ${count} 个孤立条目` : '✅ 无孤立条目，库结构健全');
+      } catch (e) { err(e); }
+    });
     bus.on(EVENTS.UI_RESTORE, async ({ file }) => {
       try {
         const text = await file.text();

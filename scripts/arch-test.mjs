@@ -255,6 +255,46 @@ bus.on(EVENTS.VAULT_ITEM_CREATED, () => { createdFired = true; });
   s.dispatch({ type: 'SET_SORT', sort: 'title_asc' });
   ok('Store: 按标题 A→Z 排序', s.getState().filtered.map((i) => i.title).join(',') === 'A,B,C');
 
+  // 21) 扩展批量操作：批量取消标签与批量设置类型
+  const bt1 = await vault.createItem({ title: 'bt1', kind: 'note', tags: ['t1', 't2'], libraryId: lib2.id, folderId: 'root', raw: { content: 'c' } });
+  await vault.bulk('untag', [bt1.id], { tag: 't1' });
+  const bt1After = await storage.user(bt1.id);
+  ok('批量取消标签生效', !bt1After.tags.includes('t1') && bt1After.tags.includes('t2'));
+
+  await vault.bulk('kind', [bt1.id], { kind: 'model' });
+  const bt1Kind = await storage.user(bt1.id);
+  ok('批量设置资源类型生效', bt1Kind.kind === 'model');
+
+  // 22) 孤立条目自愈修复 (repairOrphanedItems)
+  const orphanItem = await vault.createItem({ title: '孤立条目', kind: 'data', libraryId: lib2.id, folderId: 'f_non_existent', raw: { content: 'o' } });
+  const repairedCount = await vault.repairOrphanedItems(lib2.id);
+  const repairedItem = await storage.user(orphanItem.id);
+  ok('自愈修复计数字段一致', repairedCount >= 1);
+  ok('孤立条目成功重置归父至 root', repairedItem.folderId === 'root');
+
+  // 23) 导出 CSV 表格清单与表头验证
+  const csvContent = await vault.exportCSV();
+  ok('导出 CSV 内容包含标准表头', csvContent.startsWith('id,title,kind,tags,libraryId,folderId,createdAt,updatedAt,rawHash'));
+  ok('导出 CSV 包含新增自愈条目', csvContent.includes('孤立条目'));
+
+  // 24) 受限更新：拒绝破坏数据真实性的非白名单字段
+  let illegalErr = false;
+  try {
+    await vault.updateItem(bt1.id, { raw: { content: 'tampered' } });
+  } catch (e) {
+    illegalErr = true;
+  }
+  ok('更新机制拒绝篡改不可变 raw 字段', illegalErr);
+
+  // 25) 外部 App 调起机制 (openWith)
+  const openRes = await vault.openWith(bt1.id, 'vscode');
+  ok('openWith 成功调用底层 Shell 打开通道', openRes.ok === true && openRes.appName.includes('VS Code'));
+
+  // 26) 数据库删除连带清理校验
+  await vault.deleteItem(bt1.id);
+  await vault.deleteItem(orphanItem.id);
+  ok('删除后记录完全注销', (await storage.user(bt1.id)) === undefined);
+
   console.log(`\n架构数据层验证：${fails === 0 ? '全部通过 🎉' : fails + ' 项失败'}`);
   process.exit(fails === 0 ? 0 : 1);
 })();

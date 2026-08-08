@@ -15,6 +15,11 @@
         <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
       </div>
       <div class="side-scroll">
+        <div class="side-search">
+          <span class="ss-icon">🔍</span>
+          <input id="sideSearch" placeholder="搜索资料库 / 子项目" autocomplete="off" spellcheck="false" />
+          <button class="ss-clear" id="sideSearchClear" title="清除" hidden>✕</button>
+        </div>
         <div class="section-title">资料库
           <span class="add" id="btnNewLib" title="新建资料库">＋</span>
         </div>
@@ -35,6 +40,7 @@
           <input id="searchInput" placeholder="搜索标题 / 标签 / 原始内容…" />
           <span class="kbd">/</span>
         </div>
+        <button class="icon-btn" id="btnCmd" title="命令快捷面板 (Ctrl+K)">⚡</button>
         <button class="icon-btn" id="btnTheme" title="切换主题">🌗</button>
         <button class="icon-btn" id="btnLock" title="加密存储">🔓</button>
       </div>
@@ -101,8 +107,9 @@
     <section class="preview" id="preview"></section>
   </div>
 
-  <!-- 抽屉：操作日志 / 设置 -->
+  <!-- 抽屉与命令面板 -->
   <div class="drawer-wrap" id="drawer" hidden></div>
+  <div class="cmd-wrap" id="cmdWrap" hidden></div>
 
   <script src="core/eventBus.js"></script>
   <script src="core/ipcBridge.js"></script>

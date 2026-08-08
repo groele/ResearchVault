@@ -46,6 +46,8 @@
       this._collapsed = new Set();   // 已折叠的文件夹 id（侧栏树形折叠）
       this._dragIds = [];            // 拖拽中选中的条目 id（拖到文件夹即归类）
       this._lastActiveFolder = null; // 用于仅在文件夹切换时滚动定位
+      this._sideQuery = '';          // 侧栏搜索过滤词（UI 本地，不进 store）
+      this._editingFolder = null;    // 正在内联重命名的文件夹 id（重命名期间冻结侧栏）
       this._bindStatic();
       this._bindKeys();
       store.subscribe((s) => this.render(s));
@@ -58,6 +60,7 @@
       qs('btnNew').addEventListener('click', () => this._openCreate());
       qs('btnImport').addEventListener('click', () => this.bus.emit('ui:import:pick', {}));
       qs('btnNewFolder').addEventListener('click', () => this._openNewFolder());
+      qs('btnCmd').addEventListener('click', () => this._openCmdPalette());
       qs('btnDensity').addEventListener('click', () => {
         const d = this.store.getState().density === 'compact' ? 'comfortable' : 'compact';
         this.bus.emit(global.EVENTS.UI_DENSITY, { density: d });
@@ -73,6 +76,23 @@
         this.store.dispatch({ type: 'SET_DRAWER', drawer: 'settings' }));
       qs('btnAudit').addEventListener('click', () =>
         this.store.dispatch({ type: 'SET_DRAWER', drawer: 'audit' }));
+
+      // 侧栏搜索：按名称过滤资料库 / 子项目（不重建输入框本身，故不丢焦点）
+      const ss = qs('sideSearch');
+      const ssClear = qs('sideSearchClear');
+      if (ss) {
+        ss.addEventListener('input', (e) => {
+          this._sideQuery = e.target.value.trim();
+          if (ssClear) ssClear.hidden = !this._sideQuery;
+          this.render(this.store.getState());
+        });
+        ss.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') { ss.value = ''; this._sideQuery = ''; if (ssClear) ssClear.hidden = true; this.render(this.store.getState()); }
+        });
+      }
+      if (ssClear) ssClear.addEventListener('click', () => {
+        const s2 = qs('sideSearch'); if (s2) s2.value = ''; this._sideQuery = ''; ssClear.hidden = true; if (s2) s2.focus(); this.render(this.store.getState());
+      });
 
       // 视图分段：原始 / 对比 / 后处理
       qs('viewSeg').querySelectorAll('[data-view]').forEach((b) =>
@@ -108,6 +128,11 @@
     // ============ 键盘快捷键 ============
     _bindKeys() {
       document.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          this._openCmdPalette();
+          return;
+        }
         const t = e.target;
         if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
         if (this._modalEl) return; // 模态打开时，背景快捷键全部让位给模态自身处理
@@ -176,8 +201,11 @@
 
     // ---------- 侧边栏 ----------
     _renderSidebar(s) {
+      if (this._editingFolder) return; // 内联重命名进行中：冻结侧栏，避免输入被打断
+      const q = this._sideQuery || '';
+      const ql = q.toLowerCase();
       const sig = JSON.stringify([
-        s.activeLibraryId, s.activeFolderId, s.libraryStats,
+        s.activeLibraryId, s.activeFolderId, s.libraryStats, q,
         s.libraries.map((l) => [l.id, l.name, l.color, l.activeFolder, l.folders.map((f) => [f.id, f.name, f.parent, f.icon])]),
       ]);
       if (this._sig.sidebar === sig) return;
@@ -196,9 +224,22 @@
         return;
       }
 
-      const libs = s.libraries.map((l) => {
+      // 搜索过滤：仅保留名称命中的资料库
+      const libMatch = (l) => !ql || (l.name || '').toLowerCase().includes(ql) || (l.icon || '').toLowerCase().includes(ql);
+      const shownLibs = s.libraries.filter(libMatch);
+      if (ql && !shownLibs.length) {
+        qs('libList').innerHTML = `<div class="side-empty">
+          <div class="se-icon">🔍</div>
+          <div class="se-title">未找到匹配</div>
+          <div class="se-sub">没有名称包含「${escapeHtml(q)}」的资料库或子项目</div>
+        </div>`;
+        return;
+      }
+
+      const libs = shownLibs.map((l) => {
         const active = l.id === s.activeLibraryId;
-        const tree = active ? this._folderTree(l, s.activeFolderId) : '';
+        const expandTree = active || !!ql; // 激活库或搜索时展开树
+        const tree = expandTree ? this._folderTree(l, s.activeFolderId, ql) : '';
         const count = this._countInLib(s, l.id);
         return `
           <div class="lib-block">
@@ -224,16 +265,16 @@
 
       qs('libList').querySelectorAll('[data-lib]').forEach((el) =>
         el.onclick = () => this.bus.emit(global.EVENTS.UI_SELECT_LIBRARY, { id: el.dataset.lib }));
-      qs('libList').querySelectorAll('[data-folder]').forEach((el) =>
-        el.onclick = (e) => { if (e.target.closest('.fop') || e.target.closest('.fcaret')) return; this.bus.emit(global.EVENTS.UI_FOLDER_SELECT, { folderId: el.dataset.folder }); });
-      qs('libList').querySelectorAll('[data-fren]').forEach((el) =>
-        el.onclick = (e) => { e.stopPropagation(); this._renameFolder(el.dataset.fren); });
-      qs('libList').querySelectorAll('[data-fdel]').forEach((el) =>
-        el.onclick = (e) => { e.stopPropagation(); this._deleteFolder(el.dataset.fdel); });
-      qs('libList').querySelectorAll('[data-fcol]').forEach((el) =>
-        el.onclick = (e) => { e.stopPropagation(); this._toggleCollapse(el.dataset.fcol); });
-      // 拖拽归类：把选中的条目拖到某文件夹即移动
       qs('libList').querySelectorAll('[data-folder]').forEach((el) => {
+        el.onclick = (e) => {
+          if (e.target.closest('.fop') || e.target.closest('.fcaret')) return;
+          // 点击非激活资料库下的文件夹：先切换资料库，再进入该文件夹
+          const libEl = el.closest('.lib-block')?.querySelector('[data-lib]');
+          const libId = libEl?.dataset.lib;
+          if (libId && libId !== s.activeLibraryId) this.bus.emit(global.EVENTS.UI_SELECT_LIBRARY, { id: libId });
+          this.bus.emit(global.EVENTS.UI_FOLDER_SELECT, { folderId: el.dataset.folder });
+        };
+        // 拖拽归类：把选中的条目拖到某文件夹即移动
         el.addEventListener('dragover', (e) => { if (this._dragIds.length) { e.preventDefault(); el.classList.add('drag-over'); } });
         el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
         el.addEventListener('drop', (e) => {
@@ -247,6 +288,12 @@
           }
         });
       });
+      qs('libList').querySelectorAll('[data-fren]').forEach((el) =>
+        el.onclick = (e) => { e.stopPropagation(); this._renameFolder(el.dataset.fren); });
+      qs('libList').querySelectorAll('[data-fdel]').forEach((el) =>
+        el.onclick = (e) => { e.stopPropagation(); this._deleteFolder(el.dataset.fdel); });
+      qs('libList').querySelectorAll('[data-fcol]').forEach((el) =>
+        el.onclick = (e) => { e.stopPropagation(); this._toggleCollapse(el.dataset.fcol); });
     }
 
     _toggleCollapse(folderId) {
@@ -256,21 +303,35 @@
       this.render(this.store.getState());
     }
 
-    _folderTree(lib, activeFolderId) {
+    _folderTree(lib, activeFolderId, ql) {
       const folders = lib.folders || [{ id: 'root', name: '根目录', parent: null }];
       const byParent = {};
-      folders.forEach((f) => { (byParent[f.parent] = byParent[f.parent] || []).push(f); });
+      const byId = {};
+      folders.forEach((f) => { (byParent[f.parent] = byParent[f.parent] || []).push(f); byId[f.id] = f; });
       const hasKids = (pid) => (byParent[pid] || []).length > 0;
-      // 计算激活文件夹的祖先链，确保其始终展开（即使曾被手动折叠）
-      const ancestorIds = new Set();
-      let cur = folders.find((f) => f.id === activeFolderId);
-      while (cur && cur.parent) { ancestorIds.add(cur.parent); cur = folders.find((f) => f.id === cur.parent); }
+
+      // 需保留/展开的文件夹集合：
+      //  - 搜索模式：命中项 + 其祖先（保持树连贯），并强制展开
+      //  - 非搜索模式：激活文件夹的祖先链（确保当前位置始终可见，即便曾被折叠）
+      let keepSet = null;
+      if (ql) {
+        keepSet = new Set();
+        folders.forEach((f) => {
+          if ((f.name || '').toLowerCase().includes(ql)) {
+            let c = f; while (c) { keepSet.add(c.id); c = c.parent ? byId[c.parent] : null; }
+          }
+        });
+      } else {
+        let cur = folders.find((f) => f.id === activeFolderId);
+        while (cur && cur.parent) { (keepSet = keepSet || new Set()).add(cur.parent); cur = byId[cur.parent]; }
+      }
 
       const walk = (pid, depth) => {
-        const kids = byParent[pid] || [];
+        let kids = byParent[pid] || [];
+        if (ql) kids = kids.filter((f) => keepSet.has(f.id));
         return kids.map((f) => {
           const count = this._countInFolder(lib.id, f.id);
-          const isCollapsed = this._collapsed.has(f.id) && !ancestorIds.has(f.id);
+          const isCollapsed = !ql && this._collapsed.has(f.id) && !(keepSet && keepSet.has(f.id));
           const kidsHtml = (!isCollapsed && hasKids(f.id)) ? `<div class="subtree">${walk(f.id, depth + 1)}</div>` : '';
           const caret = hasKids(f.id)
             ? `<span class="fcaret" data-fcol="${f.id}">${isCollapsed ? '▸' : '▾'}</span>`
@@ -279,11 +340,15 @@
           const icon = f.id === 'root' ? '📦' : (isParent ? (isCollapsed ? '📁' : '📂') : '📄');
           const ops = f.id === 'root' ? '' :
             `<span class="fop"><button class="fmini" data-fren="${f.id}" title="重命名">✎</button><button class="fmini danger" data-fdel="${f.id}" title="删除（条目上移父级）">🗑</button></span>`;
+          // 搜索命中项高亮名称
+          const nameHtml = (ql && (f.name || '').toLowerCase().includes(ql))
+            ? `<span class="fname hit">${escapeHtml(f.name)}</span>`
+            : `<span class="fname">${escapeHtml(f.name)}</span>`;
           return `
             <div class="folder ${f.id === activeFolderId ? 'active' : ''} ${isCollapsed ? 'collapsed' : ''}" data-folder="${f.id}">
               ${caret}
               <span class="ficon">${icon}</span>
-              <span class="fname">${escapeHtml(f.name)}</span>
+              ${nameHtml}
               <span class="fcount">${count}</span>
               ${ops}
             </div>
@@ -489,14 +554,15 @@
         <button class="btn sm" data-b="star">★ 收藏</button>
         <button class="btn sm" data-b="unstar">☆ 取消</button>
         <button class="btn sm" data-b="tag"># 打标签</button>
+        <select class="sel" data-b="kind"><option value="">变更类型…</option><option value="code">💻 代码</option><option value="model">🤖 模型</option><option value="note">📝 笔记</option><option value="data">📊 数据</option><option value="paper">📄 论文</option><option value="image">🖼️ 图片</option><option value="other">📦 其他</option></select>
         <select class="sel" data-b="move"><option value="">移动到…</option>${folders.map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('')}</select>
         <button class="btn sm danger" data-b="delete">🗑 删除</button>
         <button class="btn sm ghost" data-b="clear">清除</button>`;
       bar.querySelector('[data-b="star"]').onclick = () => this.bus.emit(global.EVENTS.UI_BULK, { action: 'star', ids, payload: { on: true } });
       bar.querySelector('[data-b="unstar"]').onclick = () => this.bus.emit(global.EVENTS.UI_BULK, { action: 'star', ids, payload: { on: false } });
-      bar.querySelector('[data-b="tag"]').onclick = () => {
-        const tag = prompt('批量打标签（将应用到所选条目）：');
-        if (tag && tag.trim()) this.bus.emit(global.EVENTS.UI_BULK, { action: 'tag', ids, payload: { tag: tag.trim() } });
+      bar.querySelector('[data-b="tag"]').onclick = () => this._bulkTag(ids);
+      bar.querySelector('[data-b="kind"]').onchange = (e) => {
+        if (e.target.value) this.bus.emit(global.EVENTS.UI_BULK, { action: 'kind', ids, payload: { kind: e.target.value } });
       };
       bar.querySelector('[data-b="move"]').onchange = (e) => {
         if (e.target.value) this.bus.emit(global.EVENTS.UI_BULK, { action: 'move', ids, payload: { folderId: e.target.value } });
@@ -830,12 +896,51 @@
       };
     }
 
+    _bulkTag(ids) {
+      this._modal(`
+        <h3>给选中的 ${ids.length} 个条目加标签</h3>
+        <div class="field"><label>标签</label><input id="btV" placeholder="例如：重要" /></div>
+        <div class="modal-actions"><button class="btn ghost" id="btVc">取消</button><button class="btn primary" id="btVok">添加</button></div>`);
+      document.getElementById('btVc').onclick = () => this._closeModal();
+      document.getElementById('btVok').onclick = () => {
+        const tag = document.getElementById('btV').value.trim();
+        if (tag) this.bus.emit(global.EVENTS.UI_BULK, { action: 'tag', ids, payload: { tag } });
+        this._closeModal();
+      };
+    }
+
     _renameFolder(folderId) {
-      const s = this.store.getState();
-      const lib = s.libraries.find((l) => l.id === s.activeLibraryId);
-      const f = (lib?.folders || []).find((x) => x.id === folderId);
-      const name = prompt('重命名子项目：', f?.name || '');
-      if (name && name.trim()) this.bus.emit(global.EVENTS.UI_FOLDER_RENAME, { folderId, name: name.trim() });
+      if (this._editingFolder || folderId === 'root') return;
+      const el = qs('libList').querySelector(`[data-folder="${folderId}"] .fname`);
+      if (!el) return;
+      this._editingFolder = folderId;
+      const old = el.textContent;
+      el.classList.add('editing');
+      el.innerHTML = `<input class="fname-input" value="${escapeHtml(old)}" />`;
+      const inp = el.querySelector('input');
+      if (!inp) { this._editingFolder = null; el.classList.remove('editing'); return; }
+      inp.focus(); inp.select();
+      let done = false;
+      const finish = (commit) => {
+        if (done) return;
+        done = true;
+        const v = inp.value.trim();
+        this._editingFolder = null;
+        el.classList.remove('editing');
+        if (commit && v && v !== old) {
+          this.bus.emit(global.EVENTS.UI_FOLDER_RENAME, { folderId, name: v });
+          this._sig.sidebar = null; // 名称变更后强制刷新侧栏
+          this.render(this.store.getState());
+        } else {
+          this._sig.sidebar = null;
+          this.render(this.store.getState());
+        }
+      };
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+      });
+      inp.addEventListener('blur', () => finish(true));
     }
 
     _deleteFolder(folderId) {
@@ -846,6 +951,85 @@
       if (confirm(`确认删除子项目「${f?.name || folderId}」？其中的条目与子文件夹会安全上移到父级，不会删除数据。`)) {
         this.bus.emit(global.EVENTS.UI_FOLDER_DELETE, { folderId });
       }
+    }
+
+    // ============ 命令快捷面板 (Command Palette) ============
+    _openCmdPalette() {
+      const wrap = qs('cmdWrap');
+      if (!wrap) return;
+      wrap.innerHTML = `
+        <div class="cmd-box">
+          <div class="cmd-head">
+            <span>⚡</span>
+            <input id="cmdInput" placeholder="输入命令或关键词检索 (Esc 关闭)…" autofocus />
+          </div>
+          <div class="cmd-list" id="cmdList"></div>
+        </div>`;
+      wrap.hidden = false;
+      wrap.onclick = (e) => { if (e.target === wrap) this._closeCmdPalette(); };
+
+      const actions = [
+        { icon: '＋', title: '新建科研条目', kbd: 'Cmd / Ctrl + N', run: () => this._openCreate() },
+        { icon: '📁', title: '新建子项目文件夹', kbd: '', run: () => this._openNewFolder() },
+        { icon: '🗂️', title: '新建资料库', kbd: '', run: () => this._openNewLib() },
+        { icon: '⬇', title: '全量导出 JSON 备份包', kbd: '', run: () => this.bus.emit(global.EVENTS.UI_EXPORT, {}) },
+        { icon: '📊', title: '导出 CSV 表格数据清单', kbd: '', run: () => this.bus.emit('ui:export:csv', {}) },
+        { icon: '🛡️', title: '全库数据完整性指纹校验', kbd: '', run: () => this.bus.emit(global.EVENTS.UI_INTEGRITY_CHECK, {}) },
+        { icon: '🩺', title: '自愈修复孤立条目', kbd: '', run: () => this.bus.emit('ui:repair:orphans', {}) },
+        { icon: '🌗', title: '切换深浅配色主题', kbd: '', run: () => {
+          const t = this.store.getState().theme === 'dark' ? 'light' : 'dark';
+          this.bus.emit(global.EVENTS.UI_THEME, { theme: t });
+        }},
+        { icon: '🧾', title: '查看审计追踪日志', kbd: '', run: () => this.store.dispatch({ type: 'SET_DRAWER', drawer: 'audit' }) },
+        { icon: '⚙', title: '打开系统适配器设置', kbd: '', run: () => this.store.dispatch({ type: 'SET_DRAWER', drawer: 'settings' }) },
+      ];
+
+      const input = wrap.querySelector('#cmdInput');
+      const listEl = wrap.querySelector('#cmdList');
+
+      const renderCmds = (q = '') => {
+        const filter = q.toLowerCase();
+        const matches = actions.filter((a) => a.title.toLowerCase().includes(filter));
+        if (!matches.length) {
+          listEl.innerHTML = `<div class="empty sm">无匹配命令</div>`;
+          return;
+        }
+        listEl.innerHTML = matches.map((a, idx) => `
+          <div class="cmd-item ${idx === 0 ? 'active' : ''}" data-idx="${idx}">
+            <span class="c-icon">${a.icon}</span>
+            <span class="c-title">${escapeHtml(a.title)}</span>
+            <span class="c-kbd">${a.kbd}</span>
+          </div>`).join('');
+        listEl.querySelectorAll('.cmd-item').forEach((el, idx) => {
+          el.onclick = () => { this._closeCmdPalette(); matches[idx].run(); };
+        });
+      };
+
+      renderCmds();
+      if (input) {
+        input.focus();
+        input.addEventListener('input', (e) => renderCmds(e.target.value));
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') this._closeCmdPalette();
+          if (e.key === 'Enter') {
+            const active = listEl.querySelector('.cmd-item.active');
+            if (active) {
+              const idx = Number(active.dataset.idx);
+              const q = input.value.toLowerCase();
+              const matches = actions.filter((a) => a.title.toLowerCase().includes(q));
+              if (matches[idx]) {
+                this._closeCmdPalette();
+                matches[idx].run();
+              }
+            }
+          }
+        });
+      }
+    }
+
+    _closeCmdPalette() {
+      const wrap = qs('cmdWrap');
+      if (wrap) { wrap.hidden = true; wrap.innerHTML = ''; }
     }
   }
 
