@@ -315,11 +315,39 @@ bus.on(EVENTS.VAULT_ITEM_CREATED, () => { createdFired = true; });
   const mdStr = await vault.generateCitation(dup1.id, 'markdown');
   ok('generateCitation 输出标准 Markdown 引用格式', mdStr.includes('[实验数据 A]') && mdStr.includes('rv:user:'));
 
+  // 31) 科研元数据创建与保存 (researchMeta: doi, authors)
+  const rmItem = await vault.createItem({
+    title: 'AlphaFold3 蛋白质结构预测', kind: 'model', libraryId: lib2.id, folderId: 'root',
+    raw: { content: 'model-weights-metadata' },
+    researchMeta: { doi: '10.1038/s41586-024-07487-w', authors: 'Abramson et al.', reproducibility: 'unverified' },
+  });
+  const savedRm = await storage.user(rmItem.id);
+  ok('createItem 持久化科研元数据(DOI与作者)', savedRm.researchMeta?.doi === '10.1038/s41586-024-07487-w' && savedRm.researchMeta?.authors === 'Abramson et al.');
+
+  // 32) 实验可复现状态切换 (setReproducibility)
+  await vault.setReproducibility(rmItem.id, 'reproduced');
+  const reproSaved = await storage.user(rmItem.id);
+  ok('setReproducibility 切换可复现状态为 reproduced', reproSaved.researchMeta?.reproducibility === 'reproduced');
+
+  // 33) Store 可复现状态筛选器测试
+  const s2 = createStore();
+  const rItems = [
+    { id: 'r1', title: 'r1', kind: 'data', libraryId: 'L', folderId: 'root', starred: false, processedVersions: [], raw: { content: '' }, researchMeta: { reproducibility: 'reproduced' }, createdAt: 1, updatedAt: 1 },
+    { id: 'r2', title: 'r2', kind: 'data', libraryId: 'L', folderId: 'root', starred: false, processedVersions: [], raw: { content: '' }, researchMeta: { reproducibility: 'unverified' }, createdAt: 2, updatedAt: 2 },
+    { id: 'r3', title: 'r3', kind: 'data', libraryId: 'L', folderId: 'root', starred: false, processedVersions: [], raw: { content: '' }, researchMeta: { reproducibility: 'failed' }, createdAt: 3, updatedAt: 3 },
+  ];
+  s2.dispatch({ type: 'SET_ITEMS', items: rItems });
+  s2.dispatch({ type: 'SET_FILTER', patch: { reproducibility: 'reproduced' } });
+  ok('Store: 可复现筛选(仅已复现)', s2.getState().filtered.length === 1 && s2.getState().filtered[0].id === 'r1');
+  s2.dispatch({ type: 'SET_FILTER', patch: { reproducibility: 'failed' } });
+  ok('Store: 可复现筛选(仅不可复现失败项)', s2.getState().filtered.length === 1 && s2.getState().filtered[0].id === 'r3');
+
   // 清理衍生测试数据
   await vault.deleteItem(dup1.id);
   await vault.deleteItem(dup2.id);
   await vault.deleteItem(titleDup1.id);
   await vault.deleteItem(titleDup2.id);
+  await vault.deleteItem(rmItem.id);
 
   console.log(`\n架构数据层验证：${fails === 0 ? '全部通过 🎉' : fails + ' 项失败'}`);
   process.exit(fails === 0 ? 0 : 1);

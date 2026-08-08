@@ -19,7 +19,7 @@
     activeFolderId: 'root',
     items: [],               // 当前资料库的**全部**条目（文件夹过滤在 filtered 中派生）
     query: '',
-    filters: { kind: 'all', starred: false, processed: 'all' }, // processed: all|yes|no
+    filters: { kind: 'all', starred: false, processed: 'all', reproducibility: 'all' }, // processed: all|yes|no, reproducibility: all|reproduced|unverified|failed
     sort: 'created_desc',    // created_desc|created_asc|title_asc|updated_desc
     filtered: [],
     selection: [],           // 批量选择的 id
@@ -137,6 +137,7 @@
     if (f.starred) list = list.filter((i) => i.starred);
     if (f.processed === 'yes') list = list.filter((i) => (i.processedVersions || []).length > 0);
     if (f.processed === 'no') list = list.filter((i) => !(i.processedVersions || []).length);
+    if (f.reproducibility && f.reproducibility !== 'all') list = list.filter((i) => (i.researchMeta?.reproducibility || 'unverified') === f.reproducibility);
 
     const sorters = {
       created_desc: (a, b) => b.createdAt - a.createdAt,

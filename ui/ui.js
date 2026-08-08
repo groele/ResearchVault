@@ -103,6 +103,8 @@
         this.store.dispatch({ type: 'SET_FILTER', patch: { kind: e.target.value } }));
       qs('selProcessed').addEventListener('change', (e) =>
         this.store.dispatch({ type: 'SET_FILTER', patch: { processed: e.target.value } }));
+      qs('selRepro').addEventListener('change', (e) =>
+        this.store.dispatch({ type: 'SET_FILTER', patch: { reproducibility: e.target.value } }));
       qs('selSort').addEventListener('change', (e) =>
         this.store.dispatch({ type: 'SET_SORT', sort: e.target.value }));
       qs('btnStarFilter').addEventListener('click', () => {
@@ -502,6 +504,12 @@
       const procBadge = vcount ? `<span class="badge proc" title="含 ${vcount} 个后处理版本">⚙ ${vcount} 版</span>` : '';
       const curBadge = it.currentVersion ? '<span class="badge cur">处理后视图</span>' : '';
       const starBadge = it.starred ? '<span class="star-i" title="已收藏">★</span>' : '';
+      const repro = it.researchMeta?.reproducibility || 'unverified';
+      const reproBadge = repro === 'reproduced'
+        ? '<span class="badge repro ok" title="实验已复现">✔ 复现</span>'
+        : repro === 'failed'
+        ? '<span class="badge repro bad" title="复现失败">❌ 失败</span>'
+        : '';
       const sel = s.selection.includes(it.id) ? 'sel' : '';
       const focused = it.id === s.focusedId ? 'focused' : '';
       const src = it.raw?.source === 'file' ? '📄 导入' : '✎ 手建';
@@ -511,7 +519,7 @@
           <label class="card-check"><input type="checkbox" data-check ${sel ? 'checked' : ''} /></label>
           <div class="card-ico" title="${escapeHtml(kindLabel(it.kind))}">${kindIcon(it.kind)}</div>
           <div class="card-main">
-            <div class="kind">${escapeHtml(kindLabel(it.kind))} <span class="src">${src}</span> ${procBadge} ${curBadge} ${starBadge} ${verified}</div>
+            <div class="kind">${escapeHtml(kindLabel(it.kind))} <span class="src">${src}</span> ${reproBadge} ${procBadge} ${curBadge} ${starBadge} ${verified}</div>
             <div class="title">${escapeHtml(it.title || it.name)}</div>
             <div class="tags">${tags}</div>
           </div>
@@ -594,6 +602,17 @@
       const mode = s.viewMode;
       const vcount = (it.processedVersions || []).length;
       const verified = this._verifyBadge(it);
+      const rm = it.researchMeta || {};
+      const reproVal = rm.reproducibility || 'unverified';
+      const doiHtml = rm.doi ? `<span class="doi" title="DOI 编号">DOI: ${escapeHtml(rm.doi)}</span>` : '';
+      const authorsHtml = rm.authors ? `<span class="authors" title="作者/课题成员">✍ ${escapeHtml(rm.authors)}</span>` : '';
+      const reproSel = `
+        <select class="sel sm" id="pvRepro" title="标记实验可复现状态">
+          <option value="unverified" ${reproVal === 'unverified' ? 'selected' : ''}>⏳ 尚未验证复现</option>
+          <option value="reproduced" ${reproVal === 'reproduced' ? 'selected' : ''}>✔ 实验已完全复现</option>
+          <option value="failed" ${reproVal === 'failed' ? 'selected' : ''}>❌ 实验不可复现</option>
+        </select>`;
+
       const meta = `
         <div class="pv-head">
           <div class="pv-title">${escapeHtml(it.title || it.name)}</div>
@@ -602,8 +621,8 @@
       const provenance = `
         <div class="pv-prov">
           <div class="prov-row"><b>原始数据</b> · 来源 ${escapeHtml(it.raw?.source || 'manual')} · ${fmtTime(it.raw?.sourceTime || it.createdAt)}
-            ${verified} <span class="hash" title="SHA-256 指纹">${escapeHtml((it.raw?.hash || '').slice(0, 18))}…</span></div>
-          <div class="prov-row"><b>处理链</b> · 共 ${vcount} 个后处理版本${it.currentVersion ? '（当前查看：处理后）' : '（当前查看：原始）'}</div>
+            ${verified} <span class="hash" title="SHA-256 指纹">${escapeHtml((it.raw?.hash || '').slice(0, 18))}…</span> ${doiHtml} ${authorsHtml}</div>
+          <div class="prov-row"><b>处理链与复现性</b> · 共 ${vcount} 个后处理版本 · 复现状态: ${reproSel}</div>
         </div>`;
 
       const cur = (it.processedVersions || []).find((v) => v.id === it.currentVersion) || null;
@@ -659,6 +678,12 @@
           const res = await global.__vault.openWith(it.id, 'default');
           this.store.dispatch({ type: 'TOAST', toast: `已尝试调起程序 [${res.appName || '默认应用'}]` });
         } catch (e) { console.error(e); }
+      };
+      const reproEl = qs('pvRepro'); if (reproEl) reproEl.onchange = async (e) => {
+        try {
+          await global.__vault.setReproducibility(it.id, e.target.value);
+          this.store.dispatch({ type: 'TOAST', toast: '已更新可复现状态' });
+        } catch (err) { console.error(err); }
       };
       const mv = qs('pvMove'); if (mv) mv.onclick = () => this._moveItem(it);
       const tg = qs('pvTag'); if (tg) tg.onclick = () => this._tagItem(it);
@@ -854,20 +879,28 @@
 
     _openCreate() {
       this._modal(`
-        <h3>新建条目</h3>
-        <div class="field"><label>标题</label><input id="mTitle" placeholder="例如：实验原始记录" /></div>
-        <div class="field"><label>类型</label><select id="mKind">
-          <option value="note">笔记 note</option><option value="data">数据 data</option>
-          <option value="paper">论文 paper</option><option value="image">图片 image</option><option value="other">其他</option></select></div>
-        <div class="field"><label>标签（逗号分隔）</label><input id="mTags" placeholder="ml, nlp" /></div>
-        <div class="field"><label>原始内容（不可变，记录真实性）</label><textarea id="mRaw" rows="5" placeholder="粘贴或输入最原始的数据/文本…"></textarea></div>
-        <div class="modal-actions"><button class="btn ghost" id="mCancel">取消</button><button class="btn primary" id="mOk">创建</button></div>`);
+        <h3>新建科研条目</h3>
+        <div class="field"><label>标题 / 名称</label><input id="mTitle" placeholder="例如：Transformer 训练损失曲线上报" /></div>
+        <div class="field"><label>科研资产类型</label><select id="mKind">
+          <option value="code">💻 代码 code</option><option value="model">🤖 模型 model</option>
+          <option value="data">📊 数据 data</option><option value="paper">📄 论文 paper</option>
+          <option value="image">🖼️ 图片 image</option><option value="note">📝 笔记 note</option><option value="other">📦 其他</option></select></div>
+        <div class="field"><label>标签（逗号分隔）</label><input id="mTags" placeholder="ml, nlp, pytorch" /></div>
+        <div class="field"><label>DOI / 关联引用 (可选)</label><input id="mDoi" placeholder="例如：10.1038/s41586-021-03819-2" /></div>
+        <div class="field"><label>作者 / 课题组成员 (可选)</label><input id="mAuthors" placeholder="例如：Zhang et al." /></div>
+        <div class="field"><label>原始内容（不可变数据证据）</label><textarea id="mRaw" rows="4" placeholder="粘贴或输入最原始的数据/代码/文本…"></textarea></div>
+        <div class="modal-actions"><button class="btn ghost" id="mCancel">取消</button><button class="btn primary" id="mOk">创建资产条目</button></div>`);
       document.getElementById('mCancel').onclick = () => this._closeModal();
       document.getElementById('mOk').onclick = () => {
         const title = document.getElementById('mTitle').value.trim(); if (!title) return;
         const tags = document.getElementById('mTags').value.split(',').map((t) => t.trim()).filter(Boolean);
+        const researchMeta = {
+          doi: document.getElementById('mDoi').value.trim(),
+          authors: document.getElementById('mAuthors').value.trim(),
+          reproducibility: 'unverified',
+        };
         this.bus.emit(global.EVENTS.UI_CREATE_ITEM, {
-          title, kind: document.getElementById('mKind').value, tags,
+          title, kind: document.getElementById('mKind').value, tags, researchMeta,
           raw: { content: document.getElementById('mRaw').value, source: 'manual', sourceTime: Date.now() },
         });
         this._closeModal();

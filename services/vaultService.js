@@ -19,7 +19,7 @@
   const sha256 = (s) => global.storageUtils.sha256(s);
 
   /** updateItem 允许修改的字段白名单 —— raw / processedVersions / id 永不在列 */
-  const MUTABLE_FIELDS = ['title', 'name', 'kind', 'tags', 'starred', 'folderId', 'note'];
+  const MUTABLE_FIELDS = ['title', 'name', 'kind', 'tags', 'starred', 'folderId', 'note', 'researchMeta'];
 
   const AUDIT_ACTIONS = {
     CREATE: 'item.create', IMPORT: 'item.import', UPDATE: 'item.update', DELETE: 'item.delete',
@@ -266,7 +266,7 @@
     /**
      * 创建条目。原始数据一经写入即视为**不可变证据**：记录来源、来源时间、MIME 与 SHA-256 指纹。
      */
-    async createItem({ title, kind = 'note', tags = [], libraryId, folderId, raw, processed, content }) {
+    async createItem({ title, kind = 'note', tags = [], libraryId, folderId, raw, processed, content, researchMeta }) {
       const reg = await this._reg();
       libraryId = libraryId || reg.activeId;
       const lib = reg.libraries.find((l) => l.id === libraryId);
@@ -277,6 +277,13 @@
       const item = {
         id: uid('it'), title, name: title, kind, tags,
         libraryId, folderId, starred: false,
+        researchMeta: {
+          doi: researchMeta?.doi || '',
+          authors: researchMeta?.authors || '',
+          venue: researchMeta?.venue || '',
+          reproducibility: researchMeta?.reproducibility || 'unverified',
+          experimentDate: researchMeta?.experimentDate || null,
+        },
         // —— 原始数据：不可变 + 指纹 ——
         raw: {
           content: rawContent,
@@ -489,6 +496,20 @@
       item.updatedAt = Date.now();
       const stored = this._project(item);
       await this.storage.user(id, stored);
+      this.bus.emit(global.EVENTS.VAULT_ITEM_UPDATED, { item: stored });
+      return stored;
+    }
+
+    /** 标注可复现性状态 (unverified | reproduced | failed) */
+    async setReproducibility(id, status) {
+      const item = await this.storage.user(id);
+      if (!item) return;
+      item.researchMeta = item.researchMeta || {};
+      item.researchMeta.reproducibility = status;
+      item.updatedAt = Date.now();
+      const stored = this._project(item);
+      await this.storage.user(id, stored);
+      await this._audit(AUDIT_ACTIONS.UPDATE, { itemId: id, summary: `标注「${item.title}」可复现状态为 [${status}]` });
       this.bus.emit(global.EVENTS.VAULT_ITEM_UPDATED, { item: stored });
       return stored;
     }
