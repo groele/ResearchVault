@@ -40,7 +40,7 @@ function load(rel) {
   vm.runInContext(code, sandbox, { filename: rel });
 }
 
-['core/eventBus.js', 'core/ipcBridge.js', 'store/crypto.js', 'store/storage.js', 'state/store.js', 'services/vaultService.js'].forEach(load);
+['src/core/eventBus.js', 'src/core/ipcBridge.js', 'src/store/crypto.js', 'src/store/storage.js', 'src/state/store.js', 'src/services/vaultService.js'].forEach(load);
 
 const { bus, EVENTS, ipcBridge, StorageManager, adapters, VaultService, createStore, storageUtils } = sandbox;
 
@@ -385,6 +385,10 @@ bus.on(EVENTS.VAULT_ITEM_CREATED, () => { createdFired = true; });
   });
   const backlinks = await vault.getBacklinks(itemPy.id);
   ok('getBacklinks 正确检出引用当前条目的反向关联笔记', backlinks.length >= 1 && backlinks.some((b) => b.id === wikiNote.id));
+
+  // 39) 顶层文件管理空间分析 (getStorageAnalytics)
+  const analytics = await vault.getStorageAnalytics(lib2.id);
+  ok('getStorageAnalytics 正确统计科研文件分布与字节总数', analytics.totalCount >= 2 && analytics.totalBytes > 0 && analytics.kindMap.code >= 1);
 
   // 清理衍生测试数据
   await vault.deleteItem(dup1.id);

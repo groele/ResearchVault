@@ -1392,6 +1392,7 @@
             <div><span class="kbd">Ctrl + K</span> 命令快捷面板</div>
             <div><span class="kbd">Ctrl + P</span> 展开/收起侧边栏预览</div>
             <div><span class="kbd">Ctrl + G</span> 科研演进拓扑图</div>
+            <div><span class="kbd">Ctrl + M</span> 文件空间治理仪表盘</div>
             <div><span class="kbd">/</span> 聚焦全局搜索框</div>
             <div><span class="kbd">j</span> / <span class="kbd">↓</span> 选中下一条目</div>
             <div><span class="kbd">k</span> / <span class="kbd">↑</span> 选中上一条目</div>
@@ -1407,6 +1408,68 @@
           </div>
         </div>`);
       document.getElementById('helpOk').onclick = () => this._closeModal();
+    }
+
+    async _openSpaceModal() {
+      const s = this.store.getState();
+      const libId = s.activeLibraryId;
+      const analytics = await global.__vault.getStorageAnalytics(libId);
+
+      const formatSize = (bytes) => {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+      };
+
+      const kindLabels = {
+        code: '💻 代码文件',
+        model: '🤖 模型/权重',
+        data: '📊 实验数据集',
+        paper: '📄 学术论文',
+        note: '📝 科研笔记',
+        image: '🖼️ 实验图片',
+        other: '📦 其他资产',
+      };
+
+      const kindBars = Object.entries(analytics.kindMap).map(([k, count]) => {
+        const pct = analytics.totalCount ? Math.round((count / analytics.totalCount) * 100) : 0;
+        return `
+          <div style="margin-bottom:10px;">
+            <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px;">
+              <span>${kindLabels[k] || k}</span>
+              <b>${count} 项 (${pct}%)</b>
+            </div>
+            <div style="height:6px;background:var(--surface-muted);border-radius:999px;overflow:hidden;">
+              <div style="height:100%;width:${pct}%;background:var(--primary);border-radius:999px;"></div>
+            </div>
+          </div>`;
+      }).join('');
+
+      this._modal(`
+        <div style="width:640px;max-width:90vw;">
+          <h3>📊 科研文件空间治理与健康仪表盘</h3>
+          <p class="muted">基于顶层文件管理思维，评估当前资料库的文件资产分布、存储占用与健康指标</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0;">
+            <div style="background:var(--surface-subtle);padding:14px;border-radius:var(--radius);border:1px solid var(--border);">
+              <div class="muted" style="font-size:12px;">资产条目总数</div>
+              <div style="font-size:24px;font-weight:800;margin-top:4px;">${analytics.totalCount} <span style="font-size:13px;font-weight:400;">项</span></div>
+            </div>
+            <div style="background:var(--surface-subtle);padding:14px;border-radius:var(--radius);border:1px solid var(--border);">
+              <div class="muted" style="font-size:12px;">估算文本存储占用</div>
+              <div style="font-size:24px;font-weight:800;margin-top:4px;">${formatSize(analytics.totalBytes)}</div>
+            </div>
+          </div>
+          <h4 style="margin:16px 0 10px;">分类文件分布</h4>
+          ${kindBars}
+          <div style="display:flex;gap:12px;margin-top:16px;font-size:12px;color:var(--text-soft);">
+            <div>⚠️ 未打标签文件: <b>${analytics.untaggedCount}</b> 项</div>
+            <div>⏳ 待复现验证文件: <b>${analytics.unverifiedCount}</b> 项</div>
+          </div>
+          <div class="modal-actions">
+            <button class="btn primary" id="spaceOk">关闭仪表盘</button>
+          </div>
+        </div>`);
+      document.getElementById('spaceOk').onclick = () => this._closeModal();
     }
 
     _closeCmdPalette() {

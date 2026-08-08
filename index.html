@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ResearchVault · 科研数据管理系统</title>
-  <link rel="stylesheet" href="assets/styles.css" />
+  <link rel="stylesheet" href="src/assets/styles.css" />
 </head>
 <body>
   <div class="app" id="app">
@@ -41,6 +41,7 @@
           <span class="kbd">/</span>
         </div>
         <button class="icon-btn" id="btnLineage" title="科研演化拓扑图 (Ctrl+G)">🌐</button>
+        <button class="icon-btn" id="btnSpace" title="科研文件空间治理与仪表盘 (Ctrl+M)">📊</button>
         <button class="icon-btn" id="btnCmd" title="命令快捷面板 (Ctrl+K)">⚡</button>
         <button class="icon-btn" id="btnTheme" title="切换主题">🌗</button>
         <button class="icon-btn" id="btnLock" title="加密存储">🔓</button>
@@ -139,14 +140,14 @@
   <div class="drawer-wrap" id="drawer" hidden></div>
   <div class="cmd-wrap" id="cmdWrap" hidden></div>
 
-  <script src="core/eventBus.js"></script>
-  <script src="core/ipcBridge.js"></script>
-  <script src="store/crypto.js"></script>
-  <script src="store/storage.js"></script>
-  <script src="state/store.js"></script>
-  <script src="services/vaultService.js"></script>
-  <script src="ui/preview.js"></script>
-  <script src="ui/ui.js"></script>
+  <script src="src/core/eventBus.js"></script>
+  <script src="src/core/ipcBridge.js"></script>
+  <script src="src/store/crypto.js"></script>
+  <script src="src/store/storage.js"></script>
+  <script src="src/state/store.js"></script>
+  <script src="src/services/vaultService.js"></script>
+  <script src="src/ui/preview.js"></script>
+  <script src="src/ui/ui.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

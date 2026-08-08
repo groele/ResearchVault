@@ -847,6 +847,36 @@
       }
       return backlinks;
     }
+
+    /** 顶层文件管理：计算资料库存储空间分配与文件健康度仪表盘数据 */
+    async getStorageAnalytics(libraryId) {
+      const items = await this.allInLibrary(libraryId);
+      const totalCount = items.length;
+
+      const kindMap = { code: 0, model: 0, data: 0, paper: 0, note: 0, image: 0, other: 0 };
+      let totalBytes = 0;
+      let untaggedCount = 0;
+      let unverifiedCount = 0;
+
+      for (const i of items) {
+        const k = i.kind || 'other';
+        kindMap[k] = (kindMap[k] || 0) + 1;
+
+        const contentStr = (i.raw?.content || '') + (i.processed?.content || '');
+        totalBytes += contentStr.length;
+
+        if (!i.tags || !i.tags.length) untaggedCount++;
+        if ((i.researchMeta?.reproducibility || 'unverified') === 'unverified') unverifiedCount++;
+      }
+
+      return {
+        totalCount,
+        totalBytes,
+        kindMap,
+        untaggedCount,
+        unverifiedCount,
+      };
+    }
   }
 
   global.VaultService = VaultService;
