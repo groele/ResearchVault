@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ResearchVault · 科研数据管理</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <!-- 左：资料库 + 子项目文件夹树 -->
+    <aside class="sidebar">
+      <div class="side-head">
+        <div class="brand"><span class="logo">🧪</span> ResearchVault</div>
+        <button class="icon-btn" id="btnSettings" title="设置">⚙</button>
+      </div>
+      <div class="side-scroll">
+        <div class="section-title">资料库
+          <span class="add" id="btnNewLib" title="新建资料库">＋</span>
+        </div>
+        <div id="libList"></div>
+      </div>
+      <div class="side-foot">
+        <button class="foot-btn" id="btnAudit" title="查看操作日志">🧾 操作日志</button>
+        <div class="engine" id="engineInfo">存储引擎：Web 模拟文件系统</div>
+      </div>
+    </aside>
+
+    <!-- 中：列表 -->
+    <main class="main" id="mainPane">
+      <div class="topbar">
+        <div class="crumb" id="crumb"></div>
+        <div class="search">
+          <span class="mag">🔍</span>
+          <input id="searchInput" placeholder="搜索标题 / 标签 / 原始内容…" />
+          <span class="kbd">/</span>
+        </div>
+        <button class="icon-btn" id="btnTheme" title="切换主题">🌗</button>
+        <button class="icon-btn" id="btnLock" title="加密存储">🔓</button>
+      </div>
+
+      <div class="toolbar">
+        <button class="btn primary sm" id="btnNew">＋ 新建</button>
+        <button class="btn sm" id="btnImport">⬆ 导入</button>
+        <button class="btn sm" id="btnNewFolder">📁 子项目</button>
+        <span class="sep"></span>
+        <select class="sel" id="selKind" title="按类型筛选">
+          <option value="all">全部类型</option>
+          <option value="code">💻 代码</option>
+          <option value="model">🤖 模型</option>
+          <option value="note">📝 笔记</option>
+          <option value="data">📊 数据</option>
+          <option value="paper">📄 论文</option>
+          <option value="image">🖼️ 图片</option>
+          <option value="other">📦 其他</option>
+        </select>
+        <select class="sel" id="selProcessed" title="按处理状态筛选">
+          <option value="all">全部状态</option>
+          <option value="yes">已后处理</option>
+          <option value="no">仅原始</option>
+        </select>
+        <button class="btn sm toggle" id="btnStarFilter" title="只看收藏">☆ 收藏</button>
+        <select class="sel" id="selSort" title="排序">
+          <option value="created_desc">最新创建</option>
+          <option value="created_asc">最早创建</option>
+          <option value="updated_desc">最近更新</option>
+          <option value="title_asc">标题 A→Z</option>
+        </select>
+        <div class="spacer"></div>
+        <div class="seg" id="viewSeg" title="视图模式：原始 ↔ 后处理 对比 / 仅原始 / 仅后处理">
+          <button data-view="split" class="active">对比</button>
+          <button data-view="raw">原始</button>
+          <button data-view="processed">后处理</button>
+        </div>
+        <button class="btn sm" id="btnDensity">▦ 舒适</button>
+        <button class="btn sm" id="btnExport">⬇ 导出</button>
+      </div>
+
+      <div class="bulkbar" id="bulkBar" hidden></div>
+
+      <div class="content">
+        <div class="stat-row" id="stats"></div>
+        <div class="cards" id="cards"></div>
+      </div>
+
+      <div class="hintbar">
+        <span class="kbd">/</span> 搜索
+        <span class="kbd">j</span><span class="kbd">k</span> 移动
+        <span class="kbd">Enter</span> 打开
+        <span class="kbd">x</span> 收藏
+        <span class="kbd">Space</span> 多选
+        <span class="kbd">Del</span> 删除
+        <span class="kbd">Esc</span> 关闭
+        <span class="drop-tip">· 可直接把文件拖入此区域导入</span>
+      </div>
+
+      <div class="dropzone" id="dropzone"><div class="dz-inner">📥 松开即导入为原始数据</div></div>
+    </main>
+
+    <!-- 右：预览（原始 ↔ 后处理，含处理链版本） -->
+    <section class="preview" id="preview"></section>
+  </div>
+
+  <!-- 抽屉：操作日志 / 设置 -->
+  <div class="drawer-wrap" id="drawer" hidden></div>
+
+  <script src="core/eventBus.js"></script>
+  <script src="core/ipcBridge.js"></script>
+  <script src="store/crypto.js"></script>
+  <script src="store/storage.js"></script>
+  <script src="state/store.js"></script>
+  <script src="services/vaultService.js"></script>
+  <script src="ui/preview.js"></script>
+  <script src="ui/ui.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

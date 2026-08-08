@@ -1,0 +1,675 @@
+/**
+ * ui.js — UI 渲染层（视图）
+ * ----------------------------------------------------------------
+ * 三栏布局：左侧栏（资料库 + 子项目文件夹树）/ 中间条目列表 / 右侧预览(原始↔后处理)。
+ * 仅订阅 Store 渲染；业务类操作经 EVENTS.* 意图广播给 app.js 接线到 VaultService，
+ * 纯视图状态（主题/密度/视图模式/抽屉/选择/聚焦/搜索/筛选/排序）直接 dispatch 到 Store。
+ *
+ * 设计要点：
+ *  - 文件夹视图由 Store.recompute 派生，侧栏各文件夹计数基于"资料库全部条目"精确计算。
+ *  - 右侧预览支持版本选择器、原始↔后处理差异对比、原始数据 SHA-256 指纹实时校验徽章。
+ *  - 支持批量多选（Space/复选框）、拖放导入、键盘快捷键、审计抽屉与设置抽屉。
+ */
+(function (global) {
+  'use strict';
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  const qs = (id) => document.getElementById(id);
+  function fmtTime(ts) {
+    try { return new Date(ts).toLocaleString('zh-CN', { hour12: false }); }
+    catch { return String(ts || ''); }
+  }
+  function kindLabel(k) {
+    return ({ note: '笔记', data: '数据', paper: '论文', image: '图片', other: '其他' })[k] || k || '其他';
+  }
+  function kindIcon(k) {
+    return ({ note: '📝', data: '📊', paper: '📄', image: '🖼️', other: '📦' })[k] || '📦';
+  }
+
+  class UI {
+    constructor(store, bus) {
+      this.store = store;
+      this.bus = bus;
+      this._diffOpen = false;
+      this._verifyCache = new Map(); // 指纹校验结果缓存（key = id|hash），避免每次渲染重复计算 SHA-256
+      this._bindStatic();
+      this._bindKeys();
+      store.subscribe((s) => this.render(s));
+    }
+
+    // ============ 静态元素绑定（一次性）============
+    _bindStatic() {
+      qs('searchInput').addEventListener('input', (e) =>
+        this.store.dispatch({ type: 'SET_QUERY', query: e.target.value }));
+      qs('btnNew').addEventListener('click', () => this._openCreate());
+      qs('btnImport').addEventListener('click', () => this.bus.emit('ui:import:pick', {}));
+      qs('btnNewFolder').addEventListener('click', () => this._openNewFolder());
+      qs('btnDensity').addEventListener('click', () => {
+        const d = this.store.getState().density === 'compact' ? 'comfortable' : 'compact';
+        this.bus.emit(global.EVENTS.UI_DENSITY, { density: d });
+      });
+      qs('btnTheme').addEventListener('click', () => {
+        const t = this.store.getState().theme === 'dark' ? 'light' : 'dark';
+        this.bus.emit(global.EVENTS.UI_THEME, { theme: t });
+      });
+      qs('btnLock').addEventListener('click', () => this._openCrypto());
+      qs('btnExport').addEventListener('click', () => this.bus.emit(global.EVENTS.UI_EXPORT, {}));
+      qs('btnNewLib').addEventListener('click', () => this._openNewLib());
+      qs('btnSettings').addEventListener('click', () =>
+        this.store.dispatch({ type: 'SET_DRAWER', drawer: 'settings' }));
+      qs('btnAudit').addEventListener('click', () =>
+        this.store.dispatch({ type: 'SET_DRAWER', drawer: 'audit' }));
+
+      // 视图分段：原始 / 对比 / 后处理
+      qs('viewSeg').querySelectorAll('[data-view]').forEach((b) =>
+        b.addEventListener('click', () =>
+          this.store.dispatch({ type: 'SET_VIEW_MODE', mode: b.dataset.view })));
+
+      qs('selKind').addEventListener('change', (e) =>
+        this.store.dispatch({ type: 'SET_FILTER', patch: { kind: e.target.value } }));
+      qs('selProcessed').addEventListener('change', (e) =>
+        this.store.dispatch({ type: 'SET_FILTER', patch: { processed: e.target.value } }));
+      qs('selSort').addEventListener('change', (e) =>
+        this.store.dispatch({ type: 'SET_SORT', sort: e.target.value }));
+      qs('btnStarFilter').addEventListener('click', () => {
+        const cur = this.store.getState().filters.starred;
+        this.store.dispatch({ type: 'SET_FILTER', patch: { starred: !cur } });
+      });
+
+      // 拖放导入
+      const main = qs('mainPane');
+      const dz = qs('dropzone');
+      let depth = 0;
+      main.addEventListener('dragenter', (e) => { e.preventDefault(); depth++; dz.classList.add('show'); });
+      main.addEventListener('dragover', (e) => e.preventDefault());
+      main.addEventListener('dragleave', () => { depth = Math.max(0, depth - 1); if (!depth) dz.classList.remove('show'); });
+      main.addEventListener('drop', (e) => {
+        e.preventDefault(); depth = 0; dz.classList.remove('show');
+        if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+          this.bus.emit(global.EVENTS.UI_IMPORT_DROP, { fileList: e.dataTransfer.files });
+        }
+      });
+    }
+
+    // ============ 键盘快捷键 ============
+    _bindKeys() {
+      document.addEventListener('keydown', (e) => {
+        const t = e.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+        const s = this.store.getState();
+        const list = s.filtered;
+        switch (e.key) {
+          case '/': e.preventDefault(); qs('searchInput').focus(); break;
+          case 'j': case 'ArrowDown': if (list.length) { e.preventDefault(); this._moveFocus(1); } break;
+          case 'k': case 'ArrowUp': if (list.length) { e.preventDefault(); this._moveFocus(-1); } break;
+          case 'Enter': if (s.focusedId) { e.preventDefault(); this.store.dispatch({ type: 'SET_FOCUSED', id: s.focusedId }); } break;
+          case 'x': if (s.focusedId) { e.preventDefault(); this.bus.emit(global.EVENTS.UI_TOGGLE_STAR, { id: s.focusedId }); } break;
+          case ' ': if (s.focusedId) { e.preventDefault(); this.store.dispatch({ type: 'TOGGLE_SELECT', id: s.focusedId }); } break;
+          case 'Delete': case 'Backspace': if (s.focusedId) { e.preventDefault(); this._confirmDelete(s.focusedId); } break;
+          case 'Escape': this._closeOverlays(); break;
+        }
+      });
+    }
+
+    _moveFocus(dir) {
+      const s = this.store.getState();
+      const list = s.filtered;
+      if (!list.length) return;
+      const idx = list.findIndex((i) => i.id === s.focusedId);
+      let next = idx < 0 ? 0 : idx + dir;
+      next = Math.max(0, Math.min(list.length - 1, next));
+      const id = list[next].id;
+      this.store.dispatch({ type: 'SET_FOCUSED', id });
+      const el = document.querySelector(`[data-item="${id}"]`);
+      if (el) el.scrollIntoView({ block: 'nearest' });
+    }
+
+    _confirmDelete(id) {
+      const s = this.store.getState();
+      const it = s.items.find((i) => i.id === id);
+      if (!it) return;
+      if (confirm(`确认删除「${it.title || it.name}」？该操作会留痕审计，且不可自动恢复。`)) {
+        this.bus.emit(global.EVENTS.UI_DELETE_ITEM, { id });
+      }
+    }
+
+    _closeOverlays() {
+      if (this._modalEl) { this._closeModal(); return; }
+      const s = this.store.getState();
+      if (s.drawer) { this.store.dispatch({ type: 'SET_DRAWER', drawer: null }); return; }
+      if (s.selection.length) { this.store.dispatch({ type: 'CLEAR_SELECTION' }); return; }
+      if (s.focusedId) this.store.dispatch({ type: 'SET_FOCUSED', id: null });
+    }
+
+    // ============ 主渲染 ============
+    render(s) {
+      document.documentElement.setAttribute('data-theme', s.theme);
+      this._renderSidebar(s);
+      this._renderTopbar(s);
+      this._renderToolbar(s);
+      this._renderStats(s);
+      this._renderList(s);
+      this._renderBulk(s);
+      this._renderPreview(s);
+      this._renderDrawer(s);
+      this._renderToast(s);
+    }
+
+    // ---------- 侧边栏 ----------
+    _renderSidebar(s) {
+      const libs = s.libraries.map((l) => {
+        const active = l.id === s.activeLibraryId;
+        const tree = active ? this._folderTree(l, s.activeFolderId) : '';
+        const count = this._countInLib(s, l.id);
+        return `
+          <div class="lib-block">
+            <div class="lib-card ${active ? 'active' : ''}" data-lib="${l.id}">
+              <span class="dot" style="background:${l.color}"></span>
+              <div class="meta">
+                <div class="name">${escapeHtml(l.icon || '📁')} ${escapeHtml(l.name)}</div>
+                <div class="sub">${(l.status || 'active')} · ${count} 项</div>
+              </div>
+              <span class="chev">${active ? '▾' : '▸'}</span>
+            </div>
+            ${tree}
+          </div>`;
+      }).join('');
+      qs('libList').innerHTML = libs;
+
+      qs('libList').querySelectorAll('[data-lib]').forEach((el) =>
+        el.onclick = () => this.bus.emit(global.EVENTS.UI_SELECT_LIBRARY, { id: el.dataset.lib }));
+      qs('libList').querySelectorAll('[data-folder]').forEach((el) =>
+        el.onclick = (e) => { if (e.target.closest('.fop')) return; this.bus.emit(global.EVENTS.UI_FOLDER_SELECT, { folderId: el.dataset.folder }); });
+      qs('libList').querySelectorAll('[data-fren]').forEach((el) =>
+        el.onclick = (e) => { e.stopPropagation(); this._renameFolder(el.dataset.fren); });
+      qs('libList').querySelectorAll('[data-fdel]').forEach((el) =>
+        el.onclick = (e) => { e.stopPropagation(); this._deleteFolder(el.dataset.fdel); });
+    }
+
+    _folderTree(lib, activeFolderId) {
+      const folders = lib.folders || [{ id: 'root', name: '根目录', parent: null }];
+      const byParent = {};
+      folders.forEach((f) => { (byParent[f.parent] = byParent[f.parent] || []).push(f); });
+      const walk = (pid, depth) => {
+        const kids = byParent[pid] || [];
+        return kids.map((f) => {
+          const count = this._countInFolder(lib.id, f.id);
+          const indent = 6 + depth * 14;
+          const ops = f.id === 'root' ? '' :
+            `<span class="fop"><button class="fmini" data-fren="${f.id}" title="重命名">✎</button><button class="fmini danger" data-fdel="${f.id}" title="删除（条目上移父级）">🗑</button></span>`;
+          return `
+            <div class="folder ${f.id === activeFolderId ? 'active' : ''}" data-folder="${f.id}" style="padding-left:${indent}px">
+              <span class="ficon">${f.id === 'root' ? '📦' : '📂'}</span>
+              <span class="fname">${escapeHtml(f.name)}</span>
+              <span class="fcount">${count}</span>
+              ${ops}
+            </div>
+            ${walk(f.id, depth + 1)}`;
+        }).join('');
+      };
+      return `<div class="tree">${walk('root', 0)}</div>`;
+    }
+
+    _countInLib(s, libId) { return s.items.filter((i) => i.libraryId === libId).length; }
+    _countInFolder(libId, folderId) {
+      return this.store.getState().items.filter((i) => i.libraryId === libId && i.folderId === folderId).length;
+    }
+
+    // ---------- 顶栏面包屑 ----------
+    _renderTopbar(s) {
+      const lib = s.libraries.find((l) => l.id === s.activeLibraryId);
+      const folders = lib?.folders || [];
+      const path = this._folderPath(folders, s.activeFolderId);
+      qs('crumb').innerHTML = `<span class="c-lib">${escapeHtml(lib?.icon || '📁')} ${escapeHtml(lib?.name || '资料库')}</span>` +
+        path.map((f) => `<span class="c-sep">/</span><span class="c-f ${f.id === s.activeFolderId ? 'cur' : ''}">${escapeHtml(f.name)}</span>`).join('');
+      qs('btnDensity').textContent = s.density === 'compact' ? '☰ 紧凑' : '▦ 舒适';
+      qs('btnLock').textContent = s.cryptoLocked ? '🔓 加密关' : '🔒 加密开';
+      qs('btnLock').classList.toggle('on', !s.cryptoLocked);
+    }
+    _folderPath(folders, activeId) {
+      const map = Object.fromEntries((folders || []).map((f) => [f.id, f]));
+      const out = []; let cur = map[activeId];
+      while (cur) { out.unshift(cur); cur = cur.parent ? map[cur.parent] : null; }
+      return out;
+    }
+
+    // ---------- 工具栏激活态 ----------
+    _renderToolbar(s) {
+      qs('viewSeg').querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('active', b.dataset.view === s.viewMode));
+      if (qs('selKind').value !== s.filters.kind) qs('selKind').value = s.filters.kind;
+      if (qs('selProcessed').value !== s.filters.processed) qs('selProcessed').value = s.filters.processed;
+      if (qs('selSort').value !== s.sort) qs('selSort').value = s.sort;
+      qs('btnStarFilter').classList.toggle('on', !!s.filters.starred);
+      qs('btnStarFilter').textContent = s.filters.starred ? '★ 收藏' : '☆ 收藏';
+    }
+
+    // ---------- 统计 ----------
+    _renderStats(s) {
+      const vis = s.filtered;
+      const total = s.items.length;
+      const starred = vis.filter((i) => i.starred).length;
+      const processed = vis.filter((i) => (i.processedVersions || []).length > 0).length;
+      const tags = new Set(s.items.flatMap((i) => i.tags || [])).size;
+      qs('stats').innerHTML = `
+        <div class="stat"><div class="num">${vis.length}</div><div class="lbl">可见</div></div>
+        <div class="stat"><div class="num">${total}</div><div class="lbl">资料库总计</div></div>
+        <div class="stat"><div class="num">${starred}</div><div class="lbl">收藏</div></div>
+        <div class="stat"><div class="num">${processed}</div><div class="lbl">已后处理</div></div>
+        <div class="stat"><div class="num">${tags}</div><div class="lbl">标签</div></div>`;
+    }
+
+    // ---------- 卡片列表 ----------
+    _renderList(s) {
+      const wrap = qs('cards');
+      wrap.className = 'cards' + (s.density === 'compact' ? ' compact' : '');
+      if (!s.ready) { wrap.innerHTML = Array.from({ length: 8 }).map(() => '<div class="skeleton"></div>').join(''); return; }
+      if (!s.filtered.length) {
+        wrap.innerHTML = `<div class="empty" style="grid-column:1/-1"><div class="big">📚</div><div>当前视图暂无条目</div><div class="muted">点「＋ 新建」或把文件拖入此区域导入</div></div>`;
+        return;
+      }
+      wrap.innerHTML = s.filtered.map((it) => this._cardHtml(it, s)).join('');
+      wrap.querySelectorAll('[data-item]').forEach((el) => {
+        const id = el.dataset.item;
+        el.onclick = (e) => {
+          if (e.target.closest('.card-actions') || e.target.closest('.card-check')) return;
+          this.store.dispatch({ type: 'SET_FOCUSED', id });
+        };
+        const chk = el.querySelector('[data-check]');
+        if (chk) chk.onclick = (e) => { e.stopPropagation(); this.store.dispatch({ type: 'TOGGLE_SELECT', id }); };
+        el.querySelector('[data-star]').onclick = (e) => { e.stopPropagation(); this.bus.emit(global.EVENTS.UI_TOGGLE_STAR, { id }); };
+        el.querySelector('[data-del]').onclick = (e) => { e.stopPropagation(); this._confirmDelete(id); };
+      });
+    }
+
+    _cardHtml(it, s) {
+      const tags = (it.tags || []).map((t) => `<span class="tag">#${escapeHtml(t)}</span>`).join('');
+      const vcount = (it.processedVersions || []).length;
+      const procBadge = vcount ? `<span class="badge proc" title="含 ${vcount} 个后处理版本">⚙ ${vcount} 版</span>` : '';
+      const curBadge = it.currentVersion ? '<span class="badge cur">处理后视图</span>' : '';
+      const starBadge = it.starred ? '<span class="star-i">★</span>' : '';
+      const sel = s.selection.includes(it.id) ? 'sel' : '';
+      const focused = it.id === s.focusedId ? 'focused' : '';
+      const src = it.raw?.source === 'file' ? '📄 导入' : '✎ 手建';
+      const verified = this._verifyBadge(it);
+      return `
+        <div class="card ${sel} ${focused} ${it.starred ? 'starred' : ''}" data-item="${it.id}">
+          <label class="card-check"><input type="checkbox" data-check ${sel ? 'checked' : ''} /></label>
+          <div class="card-ico" title="${escapeHtml(kindLabel(it.kind))}">${kindIcon(it.kind)}</div>
+          <div class="card-main">
+            <div class="kind">${escapeHtml(kindLabel(it.kind))} <span class="src">${src}</span> ${procBadge} ${curBadge} ${starBadge} ${verified}</div>
+            <div class="title">${escapeHtml(it.title || it.name)}</div>
+            <div class="tags">${tags}</div>
+          </div>
+          <div class="card-actions">
+            <button data-star title="收藏">${it.starred ? '★' : '☆'}</button>
+            <button data-del title="删除">🗑</button>
+          </div>
+        </div>`;
+    }
+
+    _verifyBadge(it) {
+      const key = (it.id || '') + '|' + (it.raw?.hash || '');
+      if (this._verifyCache.has(key)) return this._verifyCache.get(key);
+      let html = '';
+      try {
+        const actual = global.storageUtils.sha256(it.raw?.content ?? '');
+        const ok = actual === it.raw?.hash;
+        html = ok
+          ? '<span class="badge ok" title="原始数据 SHA-256 指纹已校验">✔ 指纹</span>'
+          : '<span class="badge bad" title="指纹不符，原始数据可能已被改动">⚠ 指纹异常</span>';
+      } catch { html = ''; }
+      this._verifyCache.set(key, html);
+      return html;
+    }
+
+    // ---------- 批量操作栏 ----------
+    _renderBulk(s) {
+      const bar = qs('bulkBar');
+      if (!s.selection.length) { bar.hidden = true; bar.innerHTML = ''; return; }
+      const ids = s.selection;
+      bar.hidden = false;
+      const lib = s.libraries.find((l) => l.id === s.activeLibraryId);
+      const folders = (lib?.folders || []).filter((f) => f.id !== 'root');
+      bar.innerHTML = `
+        <span class="bulk-info">已选 <b>${ids.length}</b> 项</span>
+        <div class="spacer"></div>
+        <button class="btn sm" data-b="star">★ 收藏</button>
+        <button class="btn sm" data-b="unstar">☆ 取消</button>
+        <button class="btn sm" data-b="tag"># 打标签</button>
+        <select class="sel" data-b="move"><option value="">移动到…</option>${folders.map((f) => `<option value="${f.id}">${escapeHtml(f.name)}</option>`).join('')}</select>
+        <button class="btn sm danger" data-b="delete">🗑 删除</button>
+        <button class="btn sm ghost" data-b="clear">清除</button>`;
+      bar.querySelector('[data-b="star"]').onclick = () => this.bus.emit(global.EVENTS.UI_BULK, { action: 'star', ids, payload: { on: true } });
+      bar.querySelector('[data-b="unstar"]').onclick = () => this.bus.emit(global.EVENTS.UI_BULK, { action: 'star', ids, payload: { on: false } });
+      bar.querySelector('[data-b="tag"]').onclick = () => {
+        const tag = prompt('批量打标签（将应用到所选条目）：');
+        if (tag && tag.trim()) this.bus.emit(global.EVENTS.UI_BULK, { action: 'tag', ids, payload: { tag: tag.trim() } });
+      };
+      bar.querySelector('[data-b="move"]').onchange = (e) => {
+        if (e.target.value) this.bus.emit(global.EVENTS.UI_BULK, { action: 'move', ids, payload: { folderId: e.target.value } });
+      };
+      bar.querySelector('[data-b="delete"]').onclick = () => {
+        if (confirm(`确认批量删除 ${ids.length} 个条目？`)) this.bus.emit(global.EVENTS.UI_BULK, { action: 'delete', ids });
+      };
+      bar.querySelector('[data-b="clear"]').onclick = () => this.store.dispatch({ type: 'CLEAR_SELECTION' });
+    }
+
+    // ---------- 预览（原始 ↔ 后处理 + 差异 + 版本）----------
+    _renderPreview(s) {
+      const pane = qs('preview');
+      const it = s.items.find((i) => i.id === s.focusedId);
+      if (!it) {
+        pane.innerHTML = `<div class="pv-empty">👈 选择左侧条目以预览<br><small>支持文本 / Markdown / CSV / JSON / 图片内置预览；原始数据与后处理可逐行对比</small></div>`;
+        return;
+      }
+      const mode = s.viewMode;
+      const vcount = (it.processedVersions || []).length;
+      const verified = this._verifyBadge(it);
+      const meta = `
+        <div class="pv-head">
+          <div class="pv-title">${escapeHtml(it.title || it.name)}</div>
+          <div class="pv-tags">${(it.tags || []).map((t) => `<span class="tag">#${escapeHtml(t)}</span>`).join('')}</div>
+        </div>`;
+      const provenance = `
+        <div class="pv-prov">
+          <div class="prov-row"><b>原始数据</b> · 来源 ${escapeHtml(it.raw?.source || 'manual')} · ${fmtTime(it.raw?.sourceTime || it.createdAt)}
+            ${verified} <span class="hash" title="SHA-256 指纹">${escapeHtml((it.raw?.hash || '').slice(0, 18))}…</span></div>
+          <div class="prov-row"><b>处理链</b> · 共 ${vcount} 个后处理版本${it.currentVersion ? '（当前查看：处理后）' : '（当前查看：原始）'}</div>
+        </div>`;
+
+      const cur = (it.processedVersions || []).find((v) => v.id === it.currentVersion) || null;
+      const opts = [`<option value="">原始数据 (Raw)</option>`].concat(
+        (it.processedVersions || []).map((v, idx) =>
+          `<option value="${v.id}" ${v.id === it.currentVersion ? 'selected' : ''}>v${idx + 1} · ${escapeHtml(v.note || v.method || '处理后')} · ${fmtTime(v.processedAt)}</option>`).join(''));
+      const versionSel = vcount ? `<select class="sel pv-ver" id="pvVer">${opts}</select>` : '';
+
+      const actions = `
+        <div class="pv-actions">
+          ${versionSel}
+          <button class="btn sm" id="pvProc">⚙ 添加后处理版本</button>
+          ${it.currentVersion ? '<button class="btn sm ghost" id="pvRevert">↩ 还原原始</button>' : ''}
+          <button class="btn sm ${this._diffOpen ? 'on' : ''}" id="pvDiff">⇄ 查看差异</button>
+          <button class="btn sm ghost" id="pvMove">📁 移动</button>
+          <button class="btn sm ghost" id="pvTag"># 标签</button>
+        </div>`;
+
+      let body;
+      if (this._diffOpen && cur) {
+        body = `<div class="pv-body">${global.Preview.renderDiff(it.raw.content, cur.content)}</div>`;
+      } else if (this._diffOpen && !cur) {
+        body = `<div class="pv-note">当前为原始数据视图，尚无后处理版本可对比。点击「添加后处理版本」后再对比。</div>`;
+      } else {
+        body = '';
+        // 'details' 作为"对比"的别名，避免空预览
+        const showRaw = mode === 'raw' || mode === 'split' || mode === 'details';
+        const showProc = mode === 'processed' || mode === 'split' || mode === 'details';
+        if (showRaw) {
+          body += `<div class="pv-pane"><div class="pv-pane-h">原始 (Raw)</div><div class="pv-body">${global.Preview.render(it, 'raw')}</div></div>`;
+        }
+        if (showProc) {
+          const pHtml = it.processed ? global.Preview.render(it, 'processed') : '<div class="pv-note">尚未添加后处理版本</div>';
+          body += `<div class="pv-pane"><div class="pv-pane-h">后处理 (Processed) ${it.processed ? '' : '— 暂无'}</div><div class="pv-body">${pHtml}</div></div>`;
+        }
+      }
+      pane.innerHTML = meta + provenance + actions + `<div class="pv-split ${mode}">${body}</div>`;
+
+      const proc = qs('pvProc'); if (proc) proc.onclick = () => this._openProcess(it);
+      const rev = qs('pvRevert'); if (rev) rev.onclick = () => this.bus.emit(global.EVENTS.UI_SELECT_VERSION, { id: it.id, versionId: null });
+      const diff = qs('pvDiff'); if (diff) diff.onclick = () => { this._diffOpen = !this._diffOpen; this.render(this.store.getState()); };
+      const ver = qs('pvVer'); if (ver) ver.onchange = (e) => this.bus.emit(global.EVENTS.UI_SELECT_VERSION, { id: it.id, versionId: e.target.value || null });
+      const mv = qs('pvMove'); if (mv) mv.onclick = () => this._moveItem(it);
+      const tg = qs('pvTag'); if (tg) tg.onclick = () => this._tagItem(it);
+    }
+
+    // ---------- 抽屉：审计 / 设置 ----------
+    _renderDrawer(s) {
+      const dw = qs('drawer');
+      if (!s.drawer) { dw.hidden = true; dw.innerHTML = ''; return; }
+      dw.hidden = false;
+      if (s.drawer === 'audit') this._renderAudit(dw, s);
+      else if (s.drawer === 'settings') this._renderSettings(dw, s);
+    }
+
+    _renderAudit(dw, s) {
+      const list = s.audit || [];
+      const rows = list.length ? list.map((a) => `
+        <div class="audit-row">
+          <div class="a-time">${fmtTime(a.ts)}</div>
+          <div class="a-act"><span class="a-badge">${escapeHtml(a.action)}</span></div>
+          <div class="a-sum">${escapeHtml(a.summary || '')}</div>
+        </div>`).join('') : '<div class="pv-note">暂无操作记录</div>';
+      dw.innerHTML = `
+        <div class="drawer">
+          <div class="drawer-head"><span>🧾 操作审计日志</span><button class="icon-btn" id="dwClose">✕</button></div>
+          <div class="drawer-sub">所有写操作均留痕，可追溯到每一条数据的创建、处理、移动、删除。</div>
+          <div class="drawer-body scroll">${rows}</div>
+        </div>`;
+      dw.querySelector('#dwClose').onclick = () => this.store.dispatch({ type: 'SET_DRAWER', drawer: null });
+    }
+
+    _renderSettings(dw, s) {
+      const integ = s.integrity;
+      const integHtml = integ ? `
+        <div class="set-block">
+          <div class="set-title">最近完整性自检 · ${fmtTime(integ.checkedAt)}</div>
+          <div class="set-line ${integ.healthy ? 'ok' : 'bad'}">${integ.healthy ? '✔ 全部通过' : '⚠ 发现问题'}</div>
+          <div class="set-line">存储层损坏：${integ.storage.corrupted} 条 · 指纹不符：${integ.items.tampered} 条 · 条目总数：${integ.items.total}</div>
+          ${integ.items.list.length ? '<div class="set-line bad">问题条目：' + integ.items.list.map((x) => escapeHtml(x.title)).join('、') + '</div>' : ''}
+        </div>` : '<div class="set-block"><div class="set-line muted">尚未执行完整性自检</div></div>';
+
+      dw.innerHTML = `
+        <div class="drawer">
+          <div class="drawer-head"><span>⚙ 设置</span><button class="icon-btn" id="dwClose">✕</button></div>
+          <div class="drawer-body scroll">
+            <div class="set-block">
+              <div class="set-title">外观</div>
+              <button class="btn sm" id="setTheme">切换主题（当前 ${s.theme === 'dark' ? '深色' : '浅色'}）</button>
+              <button class="btn sm" id="setDensity">密度（当前 ${s.density === 'compact' ? '紧凑' : '舒适'}）</button>
+            </div>
+            <div class="set-block">
+              <div class="set-title">数据安全</div>
+              <button class="btn sm ${s.cryptoLocked ? 'primary' : ''}" id="setCrypto">${s.cryptoLocked ? '🔓 启用加密存储 (AES)' : '🔒 加密已启用（点击锁定）'}</button>
+              <button class="btn sm" id="setIntegrity">🩺 执行完整性自检</button>
+              <button class="btn sm" id="setClearCache">🧹 清空缓存层</button>
+              ${integHtml}
+            </div>
+            <div class="set-block">
+              <div class="set-title">备份与恢复</div>
+              <button class="btn sm" id="setExport">⬇ 导出 JSON</button>
+              <button class="btn sm" id="setRestore">⬆ 从 JSON 恢复</button>
+              <input type="file" id="setRestoreFile" accept="application/json" hidden />
+            </div>
+            <div class="set-block">
+              <div class="set-title">存储引擎</div>
+              <div class="set-line">当前：${escapeHtml(s.engine || 'FileSystemAdapter')}</div>
+              <button class="btn sm" id="setEngine">切换 IndexedDB ↔ 文件系统</button>
+            </div>
+          </div>
+        </div>`;
+
+      dw.querySelector('#dwClose').onclick = () => this.store.dispatch({ type: 'SET_DRAWER', drawer: null });
+      dw.querySelector('#setTheme').onclick = () => this.bus.emit(global.EVENTS.UI_THEME, { theme: s.theme === 'dark' ? 'light' : 'dark' });
+      dw.querySelector('#setDensity').onclick = () => this.bus.emit(global.EVENTS.UI_DENSITY, { density: s.density === 'compact' ? 'comfortable' : 'compact' });
+      dw.querySelector('#setCrypto').onclick = () => this._openCrypto();
+      dw.querySelector('#setIntegrity').onclick = () => this.bus.emit(global.EVENTS.UI_INTEGRITY, {});
+      dw.querySelector('#setClearCache').onclick = () => this.bus.emit(global.EVENTS.UI_CLEAR_CACHE, {});
+      dw.querySelector('#setExport').onclick = () => this.bus.emit(global.EVENTS.UI_EXPORT, {});
+      dw.querySelector('#setRestore').onclick = () => dw.querySelector('#setRestoreFile').click();
+      dw.querySelector('#setRestoreFile').onchange = (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (f) this.bus.emit(global.EVENTS.UI_RESTORE, { file: f });
+      };
+      dw.querySelector('#setEngine').onclick = () => this.bus.emit(global.EVENTS.UI_ENGINE_SWITCH, {});
+    }
+
+    // ---------- Toast ----------
+    _renderToast(s) {
+      const old = document.querySelector('.toast');
+      if (old) old.remove();
+      if (s.toast) {
+        const t = document.createElement('div');
+        t.className = 'toast';
+        t.textContent = s.toast;
+        document.body.appendChild(t);
+        setTimeout(() => this.store.dispatch({ type: 'TOAST', toast: null }), 2000);
+      }
+    }
+
+    // ============ 模态 ============
+    _modal(html) {
+      this._closeModal();
+      const ov = document.createElement('div');
+      ov.className = 'overlay';
+      ov.innerHTML = `<div class="modal">${html}</div>`;
+      ov.onclick = (e) => { if (e.target === ov) this._closeModal(); };
+      document.body.appendChild(ov);
+      this._modalEl = ov;
+    }
+    _closeModal() { if (this._modalEl) { this._modalEl.remove(); this._modalEl = null; } }
+
+    _openCreate() {
+      this._modal(`
+        <h3>新建条目</h3>
+        <div class="field"><label>标题</label><input id="mTitle" placeholder="例如：实验原始记录" /></div>
+        <div class="field"><label>类型</label><select id="mKind">
+          <option value="note">笔记 note</option><option value="data">数据 data</option>
+          <option value="paper">论文 paper</option><option value="image">图片 image</option><option value="other">其他</option></select></div>
+        <div class="field"><label>标签（逗号分隔）</label><input id="mTags" placeholder="ml, nlp" /></div>
+        <div class="field"><label>原始内容（不可变，记录真实性）</label><textarea id="mRaw" rows="5" placeholder="粘贴或输入最原始的数据/文本…"></textarea></div>
+        <div class="modal-actions"><button class="btn ghost" id="mCancel">取消</button><button class="btn primary" id="mOk">创建</button></div>`);
+      document.getElementById('mCancel').onclick = () => this._closeModal();
+      document.getElementById('mOk').onclick = () => {
+        const title = document.getElementById('mTitle').value.trim(); if (!title) return;
+        const tags = document.getElementById('mTags').value.split(',').map((t) => t.trim()).filter(Boolean);
+        this.bus.emit(global.EVENTS.UI_CREATE_ITEM, {
+          title, kind: document.getElementById('mKind').value, tags,
+          raw: { content: document.getElementById('mRaw').value, source: 'manual', sourceTime: Date.now() },
+        });
+        this._closeModal();
+      };
+    }
+
+    _openProcess(it) {
+      this._modal(`
+        <h3>添加后处理版本</h3>
+        <p class="muted">原始数据保持不变，这里仅记录衍生/处理后的内容及其说明，便于追溯对比。</p>
+        <div class="field"><label>处理说明（方法/变换）</label><input id="pNote" placeholder="例如：去重 + 归一化" /></div>
+        <div class="field"><label>后处理内容</label><textarea id="pContent" rows="6" placeholder="处理后的数据/文本…">${escapeHtml(it.raw?.content || '')}</textarea></div>
+        <div class="modal-actions"><button class="btn ghost" id="pCancel">取消</button><button class="btn primary" id="pOk">保存后处理</button></div>`);
+      document.getElementById('pCancel').onclick = () => this._closeModal();
+      document.getElementById('pOk').onclick = () => {
+        this.bus.emit('ui:process', { id: it.id, content: document.getElementById('pContent').value, note: document.getElementById('pNote').value });
+        this._closeModal();
+      };
+    }
+
+    _openNewLib() {
+      this._modal(`
+        <h3>新建资料库</h3>
+        <div class="field"><label>名称</label><input id="lName" placeholder="例如：博士课题" /></div>
+        <div class="field"><label>图标 emoji</label><input id="lIcon" value="📁" /></div>
+        <div class="field"><label>主题色</label><input id="lColor" type="color" value="#4f6ef7" /></div>
+        <div class="modal-actions"><button class="btn ghost" id="lCancel">取消</button><button class="btn primary" id="lOk">创建</button></div>`);
+      document.getElementById('lCancel').onclick = () => this._closeModal();
+      document.getElementById('lOk').onclick = () => {
+        const name = document.getElementById('lName').value.trim(); if (!name) return;
+        this.bus.emit('ui:library:create', {
+          name,
+          icon: document.getElementById('lIcon').value || '📁',
+          color: document.getElementById('lColor').value || '#4f6ef7',
+        });
+        this._closeModal();
+      };
+    }
+
+    _openNewFolder() {
+      const s = this.store.getState();
+      this._modal(`
+        <h3>新建子项目文件夹</h3>
+        <div class="field"><label>名称</label><input id="fName" placeholder="例如：实验A" /></div>
+        <div class="modal-actions"><button class="btn ghost" id="fCancel">取消</button><button class="btn primary" id="fOk">创建</button></div>`);
+      document.getElementById('fCancel').onclick = () => this._closeModal();
+      document.getElementById('fOk').onclick = () => {
+        const name = document.getElementById('fName').value.trim(); if (!name) return;
+        this.bus.emit(global.EVENTS.UI_FOLDER_CREATE, { name, parent: s.activeFolderId });
+        this._closeModal();
+      };
+    }
+
+    _openCrypto() {
+      const s = this.store.getState();
+      if (!s.cryptoLocked) {
+        this._modal(`
+          <h3>加密已启用</h3>
+          <p class="muted">当前存储内容以 AES-GCM 加密。点击锁定将丢弃内存密钥，已加密数据需重新输入口令才能读取。</p>
+          <div class="modal-actions"><button class="btn ghost" id="cCancel">取消</button><button class="btn" id="cLock">🔒 锁定</button></div>`);
+        document.getElementById('cCancel').onclick = () => this._closeModal();
+        document.getElementById('cLock').onclick = () => { this.bus.emit('ui:crypto:lock'); this._closeModal(); };
+        return;
+      }
+      this._modal(`
+        <h3>启用加密存储 (AES)</h3>
+        <p class="muted">使用口令派生密钥（PBKDF2）对 user / config / audit 层加密，密钥不离开本地。</p>
+        <div class="field"><label>口令</label><input id="cPwd" type="password" placeholder="设置加密口令" /></div>
+        <div class="modal-actions"><button class="btn ghost" id="cCancel">取消</button><button class="btn primary" id="cOk">解锁并启用</button></div>`);
+      document.getElementById('cCancel').onclick = () => this._closeModal();
+      document.getElementById('cOk').onclick = () => {
+        const pwd = document.getElementById('cPwd').value;
+        if (!pwd) return;
+        this.bus.emit('ui:crypto:unlock', { password: pwd });
+        this._closeModal();
+      };
+    }
+
+    _moveItem(it) {
+      const s = this.store.getState();
+      const lib = s.libraries.find((l) => l.id === s.activeLibraryId);
+      const folders = (lib?.folders || []).filter((f) => f.id !== 'root');
+      this._modal(`
+        <h3>移动「${escapeHtml(it.title || it.name)}」</h3>
+        <div class="field"><label>目标子项目</label><select id="mV">${['<option value="root">根目录</option>'].concat(folders.map((f) => `<option value="${f.id}" ${f.id === it.folderId ? 'selected' : ''}>${escapeHtml(f.name)}</option>`)).join('')}</select></div>
+        <div class="modal-actions"><button class="btn ghost" id="mVc">取消</button><button class="btn primary" id="mVok">移动</button></div>`);
+      document.getElementById('mVc').onclick = () => this._closeModal();
+      document.getElementById('mVok').onclick = () => {
+        this.bus.emit(global.EVENTS.UI_MOVE_ITEM, { id: it.id, folderId: document.getElementById('mV').value });
+        this._closeModal();
+      };
+    }
+
+    _tagItem(it) {
+      this._modal(`
+        <h3>给「${escapeHtml(it.title || it.name)}」加标签</h3>
+        <div class="field"><label>标签</label><input id="tV" placeholder="例如：重要" /></div>
+        <div class="modal-actions"><button class="btn ghost" id="tVc">取消</button><button class="btn primary" id="tVok">添加</button></div>`);
+      document.getElementById('tVc').onclick = () => this._closeModal();
+      document.getElementById('tVok').onclick = () => {
+        const tag = document.getElementById('tV').value.trim();
+        if (tag) this.bus.emit(global.EVENTS.UI_TAG_ITEM, { id: it.id, tag });
+        this._closeModal();
+      };
+    }
+
+    _renameFolder(folderId) {
+      const s = this.store.getState();
+      const lib = s.libraries.find((l) => l.id === s.activeLibraryId);
+      const f = (lib?.folders || []).find((x) => x.id === folderId);
+      const name = prompt('重命名子项目：', f?.name || '');
+      if (name && name.trim()) this.bus.emit(global.EVENTS.UI_FOLDER_RENAME, { folderId, name: name.trim() });
+    }
+
+    _deleteFolder(folderId) {
+      const s = this.store.getState();
+      const lib = s.libraries.find((l) => l.id === s.activeLibraryId);
+      const f = (lib?.folders || []).find((x) => x.id === folderId);
+      if (folderId === 'root') return;
+      if (confirm(`确认删除子项目「${f?.name || folderId}」？其中的条目与子文件夹会安全上移到父级，不会删除数据。`)) {
+        this.bus.emit(global.EVENTS.UI_FOLDER_DELETE, { folderId });
+      }
+    }
+  }
+
+  global.UI = UI;
+})(window);
