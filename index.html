@@ -104,13 +104,17 @@
         <span class="kbd">Space</span> 多选
         <span class="kbd">Del</span> 删除
         <span class="kbd">Esc</span> 关闭
+        <span class="kbd">Ctrl+P</span> 侧栏预览
         <span class="drop-tip">· 可直接把文件拖入此区域导入</span>
       </div>
 
       <div class="dropzone" id="dropzone"><div class="dz-inner">📥 松开即导入为原始数据</div></div>
     </main>
 
-    <!-- 右：预览（原始 ↔ 后处理，含处理链版本） -->
+    <!-- 可拖拽分割条 -->
+    <div class="pv-resizer" id="pvResizer" title="拖拽调节侧边栏预览宽度"></div>
+
+    <!-- 右：预览侧边栏 -->
     <section class="preview" id="preview"></section>
   </div>
 

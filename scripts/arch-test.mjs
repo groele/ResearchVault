@@ -363,6 +363,17 @@ bus.on(EVENTS.VAULT_ITEM_CREATED, () => { createdFired = true; });
   ok('_ingest 文件夹导入: train.py 打标签且归类至 src 文件夹', itemPy && itemPy.tags.includes('python') && itemPy.kind === 'code');
   ok('_ingest 文件夹导入: bert.pt 打标签且归类至 models 文件夹', itemPt && itemPt.tags.includes('pytorch') && itemPt.kind === 'model');
 
+  // 36) 元数据行内编辑能力验证 (updateItem title/tags/researchMeta)
+  if (itemPy) {
+    await vault.updateItem(itemPy.id, {
+      title: '分布式模型训练入口脚本.py',
+      tags: ['code', 'python', 'pytorch', 'distributed'],
+      researchMeta: { doi: '10.1038/s41586-024-0000-0', authors: '科研小组' },
+    });
+    const updatedPy = await storage.user(itemPy.id);
+    ok('updateItem 成功行内更新资产标题、扩展标签与科研DOI', updatedPy.title === '分布式模型训练入口脚本.py' && updatedPy.tags.includes('distributed') && updatedPy.researchMeta?.doi === '10.1038/s41586-024-0000-0');
+  }
+
   // 清理衍生测试数据
   await vault.deleteItem(dup1.id);
   await vault.deleteItem(dup2.id);

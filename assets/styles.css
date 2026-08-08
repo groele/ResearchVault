@@ -588,6 +588,21 @@ body {
   box-shadow: var(--shadow-lg);
 }
 
+/* 侧边栏拖拽分割条 */
+.pv-resizer {
+  width: 5px;
+  background: var(--border);
+  cursor: col-resize;
+  transition: background 0.15s ease, width 0.15s ease;
+  user-select: none;
+  z-index: 10;
+}
+.pv-resizer:hover, .pv-resizer.dragging {
+  background: var(--primary);
+  width: 7px;
+  box-shadow: 0 0 8px var(--primary-glow);
+}
+
 /* ---------- 3. 右侧 Inspector 面板 ---------- */
 .preview {
   background: var(--surface);
@@ -595,6 +610,54 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* 预览栏顶部 Tab 标签导航 */
+.pv-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-subtle);
+  padding: 0 8px;
+}
+.pv-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+}
+.pv-tab {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-soft);
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.pv-tab:hover {
+  color: var(--text);
+}
+.pv-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  background: var(--surface-card);
+}
+.pv-close-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
+.pv-close-btn:hover {
+  background: var(--border);
+  color: var(--text);
 }
 
 .pv-empty { margin: auto; text-align: center; color: var(--text-soft); font-size: 13.5px; line-height: 1.8; }

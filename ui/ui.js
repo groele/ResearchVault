@@ -48,8 +48,10 @@
       this._lastActiveFolder = null; // 用于仅在文件夹切换时滚动定位
       this._sideQuery = '';          // 侧栏搜索过滤词（UI 本地，不进 store）
       this._editingFolder = null;    // 正在内联重命名的文件夹 id（重命名期间冻结侧栏）
+      this._pvTab = 'doc';           // 侧栏预览当前页签 (doc | meta | provenance | diff)
       this._bindStatic();
       this._bindKeys();
+      this._bindResizer();
       store.subscribe((s) => this.render(s));
     }
 
@@ -128,12 +130,64 @@
       });
     }
 
+    // ============ 预览侧边栏动态拖拽宽度 ============
+    _bindResizer() {
+      const resizer = qs('pvResizer');
+      const preview = qs('preview');
+      if (!resizer || !preview) return;
+
+      const savedWidth = localStorage.getItem('rv_preview_width');
+      if (savedWidth) preview.style.width = savedWidth + 'px';
+
+      let isDragging = false;
+      let startX = 0;
+      let startWidth = 0;
+
+      resizer.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startWidth = preview.getBoundingClientRect().width;
+        resizer.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+      });
+
+      window.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const delta = startX - e.clientX;
+        const newWidth = Math.max(320, Math.min(850, startWidth + delta));
+        preview.style.width = newWidth + 'px';
+        localStorage.setItem('rv_preview_width', newWidth);
+      });
+
+      window.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          resizer.classList.remove('dragging');
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+        }
+      });
+    }
+
     // ============ 键盘快捷键 ============
     _bindKeys() {
       document.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
           e.preventDefault();
           this._openCmdPalette();
+          return;
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
+          e.preventDefault();
+          const pane = qs('preview');
+          const resizer = qs('pvResizer');
+          if (pane) {
+            const isHidden = pane.style.display === 'none';
+            pane.style.display = isHidden ? 'flex' : 'none';
+            if (resizer) resizer.style.display = isHidden ? 'block' : 'none';
+            this.store.dispatch({ type: 'TOAST', toast: isHidden ? '📖 已展开侧栏预览 (Ctrl+P)' : '✕ 已收起侧栏预览 (Ctrl+P)' });
+          }
           return;
         }
         const t = e.target;
@@ -583,20 +637,22 @@
       bar.querySelector('[data-b="clear"]').onclick = () => this.store.dispatch({ type: 'CLEAR_SELECTION' });
     }
 
-    // ---------- 预览（原始 ↔ 后处理 + 差异 + 版本）----------
+    // ---------- 预览（侧边栏页签切换 + 拖拽宽度 + 真实性与多版本）----------
     _renderPreview(s) {
       const pane = qs('preview');
       const it = s.items.find((i) => i.id === s.focusedId);
+      this._pvTab = this._pvTab || 'doc';
+
       const sig = JSON.stringify([
-        s.focusedId, s.viewMode, this._diffOpen,
-        it ? [it.raw?.hash, (it.processedVersions || []).length, it.currentVersion, it.title, (it.tags || []).join(','), it.processed?.hash] : null,
+        s.focusedId, s.viewMode, this._diffOpen, this._pvTab,
+        it ? [it.raw?.hash, (it.processedVersions || []).length, it.currentVersion, it.title, (it.tags || []).join(','), it.processed?.hash, JSON.stringify(it.researchMeta || {})] : null,
       ]);
       if (this._sig.preview === sig && pane.dataset.bound) return;
       this._sig.preview = sig;
 
       if (!it) {
         pane.dataset.bound = '0';
-        pane.innerHTML = `<div class="pv-empty">👈 选择左侧条目以预览<br><small>支持文本 / Markdown / CSV / JSON / 图片内置预览；原始数据与后处理可逐行对比</small></div>`;
+        pane.innerHTML = `<div class="pv-empty">👈 选择左侧条目以预览<br><small>支持文本 / Markdown / CSV / JSON / 图片内置预览；学术元数据与后处理可逐行对比</small></div>`;
         return;
       }
       pane.dataset.bound = '1';
@@ -605,52 +661,49 @@
       const verified = this._verifyBadge(it);
       const rm = it.researchMeta || {};
       const reproVal = rm.reproducibility || 'unverified';
-      const doiHtml = rm.doi ? `<span class="doi" title="DOI 编号">DOI: ${escapeHtml(rm.doi)}</span>` : '';
-      const authorsHtml = rm.authors ? `<span class="authors" title="作者/课题成员">✍ ${escapeHtml(rm.authors)}</span>` : '';
-      const reproSel = `
-        <select class="sel sm" id="pvRepro" title="标记实验可复现状态">
-          <option value="unverified" ${reproVal === 'unverified' ? 'selected' : ''}>⏳ 尚未验证复现</option>
-          <option value="reproduced" ${reproVal === 'reproduced' ? 'selected' : ''}>✔ 实验已完全复现</option>
-          <option value="failed" ${reproVal === 'failed' ? 'selected' : ''}>❌ 实验不可复现</option>
-        </select>`;
 
-      const meta = `
+      // 顶部 Tab 导航与关闭按钮
+      const navHeader = `
+        <div class="pv-nav">
+          <div class="pv-tabs">
+            <button class="pv-tab ${this._pvTab === 'doc' ? 'active' : ''}" data-pvtab="doc">📄 资产内容</button>
+            <button class="pv-tab ${this._pvTab === 'meta' ? 'active' : ''}" data-pvtab="meta">🔬 学术元数据</button>
+            <button class="pv-tab ${this._pvTab === 'provenance' ? 'active' : ''}" data-pvtab="provenance">🛡️ 真实性指纹</button>
+            <button class="pv-tab ${this._pvTab === 'diff' ? 'active' : ''}" data-pvtab="diff">⚙ 版本对比 ${vcount ? `(${vcount})` : ''}</button>
+          </div>
+          <button class="pv-close-btn" id="pvCloseBtn" title="收起预览 (Ctrl+P)">✕</button>
+        </div>`;
+
+      // 顶部 Head：标题 + 标签 + 快捷编辑
+      const head = `
         <div class="pv-head">
-          <div class="pv-title">${escapeHtml(it.title || it.name)}</div>
+          <div style="display:flex;align-items:center;justify-content:space-between;">
+            <div class="pv-title">${escapeHtml(it.title || it.name)}</div>
+            <button class="btn sm ghost" id="pvInlineEdit" title="快速编辑名称、标签与元数据">✎ 编辑</button>
+          </div>
           <div class="pv-tags">${(it.tags || []).map((t) => `<span class="tag">#${escapeHtml(t)}</span>`).join('')}</div>
         </div>`;
-      const provenance = `
-        <div class="pv-prov">
-          <div class="prov-row"><b>原始数据</b> · 来源 ${escapeHtml(it.raw?.source || 'manual')} · ${fmtTime(it.raw?.sourceTime || it.createdAt)}
-            ${verified} <span class="hash" title="SHA-256 指纹">${escapeHtml((it.raw?.hash || '').slice(0, 18))}…</span> ${doiHtml} ${authorsHtml}</div>
-          <div class="prov-row"><b>处理链与复现性</b> · 共 ${vcount} 个后处理版本 · 复现状态: ${reproSel}</div>
-        </div>`;
 
-      const cur = (it.processedVersions || []).find((v) => v.id === it.currentVersion) || null;
-      const opts = [`<option value="">原始数据 (Raw)</option>`].concat(
-        (it.processedVersions || []).map((v, idx) =>
-          `<option value="${v.id}" ${v.id === it.currentVersion ? 'selected' : ''}>v${idx + 1} · ${escapeHtml(v.note || v.method || '处理后')} · ${fmtTime(v.processedAt)}</option>`).join(''));
-      const versionSel = vcount ? `<select class="sel pv-ver" id="pvVer">${opts}</select>` : '';
+      let tabBody = '';
 
-      const actions = `
-        <div class="pv-actions">
-          ${versionSel}
-          <button class="btn sm" id="pvProc">⚙ 添加后处理版本</button>
-          ${it.currentVersion ? '<button class="btn sm ghost" id="pvRevert">↩ 还原原始</button>' : ''}
-          <button class="btn sm ${this._diffOpen ? 'on' : ''}" id="pvDiff">⇄ 查看差异</button>
-          <button class="btn sm ghost" id="pvCite" title="复制 BibTeX 学术引用卡片">📋 BibTeX</button>
-          <button class="btn sm ghost" id="pvOpenApp" title="调起外部程序打开">🚀 外部打开</button>
-          <button class="btn sm ghost" id="pvMove">📁 移动</button>
-          <button class="btn sm ghost" id="pvTag"># 标签</button>
-        </div>`;
+      if (this._pvTab === 'doc') {
+        const cur = (it.processedVersions || []).find((v) => v.id === it.currentVersion) || null;
+        const opts = [`<option value="">原始数据 (Raw)</option>`].concat(
+          (it.processedVersions || []).map((v, idx) =>
+            `<option value="${v.id}" ${v.id === it.currentVersion ? 'selected' : ''}>v${idx + 1} · ${escapeHtml(v.note || v.method || '处理后')} · ${fmtTime(v.processedAt)}</option>`).join(''));
+        const versionSel = vcount ? `<select class="sel pv-ver" id="pvVer">${opts}</select>` : '';
 
-      let body;
-      if (this._diffOpen && cur) {
-        body = `<div class="pv-body">${this._safePreview(() => global.Preview.renderDiff(it.raw.content, cur.content), '差异渲染失败')}</div>`;
-      } else if (this._diffOpen && !cur) {
-        body = `<div class="pv-note">当前为原始数据视图，尚无后处理版本可对比。点击「添加后处理版本」后再对比。</div>`;
-      } else {
-        body = '';
+        const actions = `
+          <div class="pv-actions">
+            ${versionSel}
+            <button class="btn sm" id="pvProc">⚙ 添加后处理版本</button>
+            ${it.currentVersion ? '<button class="btn sm ghost" id="pvRevert">↩ 还原原始</button>' : ''}
+            <button class="btn sm ghost" id="pvOpenApp" title="调起外部程序打开">🚀 外部打开</button>
+            <button class="btn sm ghost" id="pvMove">📁 移动</button>
+            <button class="btn sm ghost" id="pvTag"># 标签</button>
+          </div>`;
+
+        let body = '';
         const showRaw = mode === 'raw' || mode === 'split' || mode === 'details';
         const showProc = mode === 'processed' || mode === 'split' || mode === 'details';
         if (showRaw) {
@@ -660,20 +713,77 @@
           const pHtml = it.processed ? this._safePreview(() => global.Preview.render(it, 'processed'), '后处理预览渲染失败') : '<div class="pv-note">尚未添加后处理版本</div>';
           body += `<div class="pv-pane"><div class="pv-pane-h">后处理 (Processed) ${it.processed ? '' : '— 暂无'}</div><div class="pv-body">${pHtml}</div></div>`;
         }
+        tabBody = actions + `<div class="pv-split ${mode}">${body}</div>`;
+
+      } else if (this._pvTab === 'meta') {
+        const doiLink = rm.doi ? `<a href="https://doi.org/${escapeHtml(rm.doi)}" target="_blank" rel="noreferrer" style="color:var(--primary);">https://doi.org/${escapeHtml(rm.doi)}</a>` : '<span class="muted">未填写</span>';
+        const reproSel = `
+          <select class="sel" id="pvRepro" style="width:100%;margin-top:4px;">
+            <option value="unverified" ${reproVal === 'unverified' ? 'selected' : ''}>⏳ 尚未验证复现</option>
+            <option value="reproduced" ${reproVal === 'reproduced' ? 'selected' : ''}>✔ 实验已完全复现</option>
+            <option value="failed" ${reproVal === 'failed' ? 'selected' : ''}>❌ 实验不可复现</option>
+          </select>`;
+
+        tabBody = `
+          <div class="pv-body" style="line-height:1.8;">
+            <div class="field"><label>DOI 链接</label><div>${doiLink}</div></div>
+            <div class="field"><label>作者 / 课题组成员</label><div>${escapeHtml(rm.authors || '未填写')}</div></div>
+            <div class="field"><label>实验可复现性状态</label>${reproSel}</div>
+            <div class="field" style="margin-top:16px;">
+              <label>学术引用快捷工具</label>
+              <div style="display:flex;gap:8px;margin-top:6px;">
+                <button class="btn sm primary" id="pvCiteBib">📋 复制 BibTeX 节点</button>
+                <button class="btn sm" id="pvCiteMd">📝 复制 Markdown 引用</button>
+              </div>
+            </div>
+          </div>`;
+
+      } else if (this._pvTab === 'provenance') {
+        tabBody = `
+          <div class="pv-body" style="line-height:1.8;">
+            <div class="pv-prov" style="margin-bottom:12px;border-radius:var(--radius-sm);">
+              <div class="prov-row"><b>真实性状态</b>：${verified}</div>
+              <div class="prov-row"><b>SHA-256 指纹</b>：<code style="font-size:11px;user-select:all;">${escapeHtml(it.raw?.hash || '')}</code></div>
+              <div class="prov-row"><b>数据来源</b>：${escapeHtml(it.raw?.source || 'manual')} (${fmtTime(it.raw?.sourceTime || it.createdAt)})</div>
+              <div class="prov-row"><b>文件大小</b>：${it.raw?.size || 0} 字节 · MIME: ${escapeHtml(it.raw?.mime || 'text/plain')}</div>
+            </div>
+            <div class="field"><label>数据不可变承诺</label><p class="muted" style="font-size:12px;">原始数据在首次创建时已进行密码学哈希锁定，后续任何针对本资产的操作均作为后处理衍生版本进行留痕追加，保障科研证据绝对可信。</p></div>
+          </div>`;
+
+      } else if (this._pvTab === 'diff') {
+        const cur = (it.processedVersions || []).find((v) => v.id === it.currentVersion) || null;
+        if (!cur) {
+          tabBody = `<div class="pv-body"><div class="pv-note">当前为原始数据视图，尚无后处理版本可对比。点击「资产内容」页签下的「添加后处理版本」后再进行对比。</div></div>`;
+        } else {
+          tabBody = `<div class="pv-body">${this._safePreview(() => global.Preview.renderDiff(it.raw.content, cur.content), '差异渲染失败')}</div>`;
+        }
       }
-      pane.innerHTML = meta + provenance + actions + `<div class="pv-split ${mode}">${body}</div>`;
+
+      pane.innerHTML = navHeader + head + tabBody;
+
+      // 绑定 Tab 切换事件
+      pane.querySelectorAll('[data-pvtab]').forEach((btn) => {
+        btn.onclick = () => {
+          this._pvTab = btn.dataset.pvtab;
+          this.render(this.store.getState());
+        };
+      });
+
+      const closeBtn = qs('pvCloseBtn');
+      if (closeBtn) {
+        closeBtn.onclick = () => {
+          pane.style.display = 'none';
+          const resizer = qs('pvResizer');
+          if (resizer) resizer.style.display = 'none';
+        };
+      }
+
+      const inlineEdit = qs('pvInlineEdit');
+      if (inlineEdit) inlineEdit.onclick = () => this._openInlineEdit(it);
 
       const proc = qs('pvProc'); if (proc) proc.onclick = () => this._openProcess(it);
       const rev = qs('pvRevert'); if (rev) rev.onclick = () => this.bus.emit(global.EVENTS.UI_SELECT_VERSION, { id: it.id, versionId: null });
-      const diff = qs('pvDiff'); if (diff) diff.onclick = () => { this._diffOpen = !this._diffOpen; this.render(this.store.getState()); };
       const ver = qs('pvVer'); if (ver) ver.onchange = (e) => this.bus.emit(global.EVENTS.UI_SELECT_VERSION, { id: it.id, versionId: e.target.value || null });
-      const cite = qs('pvCite'); if (cite) cite.onclick = async () => {
-        try {
-          const bib = await global.__vault.generateCitation(it.id, 'bibtex');
-          await navigator.clipboard.writeText(bib);
-          this.store.dispatch({ type: 'TOAST', toast: '📋 已复制 BibTeX 学术引用卡片' });
-        } catch (e) { console.error(e); }
-      };
       const openApp = qs('pvOpenApp'); if (openApp) openApp.onclick = async () => {
         try {
           const res = await global.__vault.openWith(it.id, 'default');
@@ -686,8 +796,49 @@
           this.store.dispatch({ type: 'TOAST', toast: '已更新可复现状态' });
         } catch (err) { console.error(err); }
       };
+      const citeBib = qs('pvCiteBib'); if (citeBib) citeBib.onclick = async () => {
+        try {
+          const bib = await global.__vault.generateCitation(it.id, 'bibtex');
+          await navigator.clipboard.writeText(bib);
+          this.store.dispatch({ type: 'TOAST', toast: '📋 已复制 BibTeX 学术引用卡片' });
+        } catch (e) { console.error(e); }
+      };
+      const citeMd = qs('pvCiteMd'); if (citeMd) citeMd.onclick = async () => {
+        try {
+          const md = await global.__vault.generateCitation(it.id, 'markdown');
+          await navigator.clipboard.writeText(md);
+          this.store.dispatch({ type: 'TOAST', toast: '📝 已复制 Markdown 引用链接' });
+        } catch (e) { console.error(e); }
+      };
       const mv = qs('pvMove'); if (mv) mv.onclick = () => this._moveItem(it);
       const tg = qs('pvTag'); if (tg) tg.onclick = () => this._tagItem(it);
+    }
+
+    _openInlineEdit(it) {
+      const rm = it.researchMeta || {};
+      this._modal(`
+        <h3>✎ 快速编辑资产元数据</h3>
+        <div class="field"><label>标题 / 名称</label><input id="ieTitle" value="${escapeHtml(it.title || it.name)}" /></div>
+        <div class="field"><label>标签（逗号分隔）</label><input id="ieTags" value="${escapeHtml((it.tags || []).join(', '))}" /></div>
+        <div class="field"><label>DOI 编号</label><input id="ieDoi" value="${escapeHtml(rm.doi || '')}" placeholder="例如 10.1038/s41586-021-03819-2" /></div>
+        <div class="field"><label>作者 / 课题组成员</label><input id="ieAuthors" value="${escapeHtml(rm.authors || '')}" placeholder="例如 Zhang et al." /></div>
+        <div class="modal-actions"><button class="btn ghost" id="ieCancel">取消</button><button class="btn primary" id="ieSave">保存修改</button></div>`);
+      document.getElementById('ieCancel').onclick = () => this._closeModal();
+      document.getElementById('ieSave').onclick = async () => {
+        const title = document.getElementById('ieTitle').value.trim();
+        if (!title) return;
+        const tags = document.getElementById('ieTags').value.split(',').map((t) => t.trim()).filter(Boolean);
+        const researchMeta = {
+          ...rm,
+          doi: document.getElementById('ieDoi').value.trim(),
+          authors: document.getElementById('ieAuthors').value.trim(),
+        };
+        try {
+          await global.__vault.updateItem(it.id, { title, name: title, tags, researchMeta });
+          this.store.dispatch({ type: 'TOAST', toast: '元数据已成功更新' });
+          this._closeModal();
+        } catch (e) { console.error(e); }
+      };
     }
 
     /** 包裹预览渲染，异常时返回降级提示，避免单条坏数据拖垮整个 UI */
